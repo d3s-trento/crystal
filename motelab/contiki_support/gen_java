@@ -1,0 +1,1 @@
+nescc-mig -java-classname=TestWilabContiki java wilab.h wilab_Contiki_printf
