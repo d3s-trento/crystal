@@ -1,6 +1,6 @@
 .*.swp
-symbols.c
-symbols.h
+app/crystal/symbols.c
+app/crystal/symbols.h
 obj_sky
 contiki-sky.map
 contiki-sky.a
