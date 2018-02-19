@@ -11,5 +11,5 @@ Crystal got the [2nd prize](https://iti-testbed.tugraz.at/blog/page/11/ewsn-18-d
 ## Status
 Currently the protocol is implemented for the TMote Sky platform only. Porting it to more modern platforms is in our near future plans.
 
-***Disclaimer:*** *Although we tested the code extensively, Crystal is a research prototype that likely contain bugs. We take no responsibility for and give no warranties in respect of using the code.*
+***Disclaimer:*** *Although we tested the code extensively, Crystal is a research prototype that likely contains bugs. We take no responsibility for and give no warranties in respect of using the code.*
 
