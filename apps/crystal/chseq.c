@@ -53,10 +53,10 @@ static inline int get_channel_epoch(crystal_epoch_t epoch) {
 
 static inline int get_channel_epoch_ta(crystal_epoch_t epoch, uint8_t ta) {
   //return channel_array[((epoch + 3 + ta)*7) % get_num_channels()];
+  //return channel_array[((epoch + ta)*7 + epoch) % get_num_channels()];
   return channel_array[((7*epoch + ta + 1)*7)% get_num_channels()];
 }
 
-enum scan_rx {SCAN_RX_NOTHING, SCAN_RX_S, SCAN_RX_A};
 
 #if BOOT_CHOPPING == BOOT_nohop
 static inline int get_channel_node_bootstrap(){
@@ -64,6 +64,7 @@ static inline int get_channel_node_bootstrap(){
 }
 #elif BOOT_CHOPPING == BOOT_hop3
 
+enum scan_rx {SCAN_RX_NOTHING, SCAN_RX_S, SCAN_RX_A};
 enum scan_state {SCAN_ST_CHASE_S, SCAN_ST_SEARCH} scan_state;
 
 static uint32_t        scan_last_hop_ago;
@@ -73,27 +74,19 @@ static uint8_t         scan_epoch_misses;
 static uint8_t         scan_last_ch_index;
 
 #define SCAN_MAX_S_MISSES 5
-#define SCAN_START_CHASING_S 0
 
 static inline int get_channel_node_bootstrap(enum scan_rx rx){
   static first_time = 1;
 
   if (first_time) {// first time 
-    first_time = 0;
     scan_last_check_time = RTIMER_NOW();
-#if SCAN_START_CHASING_S
     // root starts with epoch 1, so if we all start roughly at the same time, we'll use the same channel.
     scan_last_epoch = 1;
     scan_state = SCAN_ST_CHASE_S;
+    first_time = 0;
     // we might be late for the first S, try it but change to the next one in half-epoch time
     scan_last_hop_ago = CRYSTAL_PERIOD / 2;
     return get_channel_epoch(scan_last_epoch);
-#else // SCAN_START_CHASING_S
-    scan_last_ch_index = 0;
-    scan_state = SCAN_ST_SEARCH;
-    scan_last_hop_ago = 0;
-    return channel_array[scan_last_ch_index];
-#endif // SCAN_START_CHASING_S
   }
 
   scan_last_hop_ago += RTIMER_NOW() - scan_last_check_time;

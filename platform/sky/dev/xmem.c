@@ -148,12 +148,20 @@ erase_sector(unsigned long offset)
 void
 xmem_init(void)
 {
+  int s;
   spi_init();
 
   P4DIR |= BV(FLASH_CS) | BV(FLASH_HOLD) | BV(FLASH_PWR);
   P4OUT |= BV(FLASH_PWR);       /* P4.3 Output, turn on power! */
 
+  /* Release from Deep Power-down */
+  s = splhigh();
+  SPI_FLASH_ENABLE();
+  FASTSPI_TX(SPI_FLASH_INS_RES);
+  SPI_WAITFORTx_ENDED();
   SPI_FLASH_DISABLE();		/* Unselect flash. */
+  splx(s);
+
   SPI_FLASH_UNHOLD();
 }
 /*---------------------------------------------------------------------------*/
@@ -191,7 +199,7 @@ xmem_pread(void *_p, int size, unsigned long offset)
   return size;
 }
 /*---------------------------------------------------------------------------*/
-static const char *
+static const unsigned char *
 program_page(unsigned long offset, const unsigned char *p, int nbytes)
 {
   const unsigned char *end = p + nbytes;

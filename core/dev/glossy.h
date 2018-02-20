@@ -73,9 +73,10 @@
 #define CLOCK_PHI                     (F_CPU / RTIMER_SECOND)
 #endif /* COOJA */
 
-#define GLOSSY_APP_HEADER_MASK        0xf0
+#define GLOSSY_HEADER                 0xa0
+#define GLOSSY_HEADER_MASK            0xf0
+#define GLOSSY_APP_HEADER_MASK        0x07
 #define GLOSSY_HEADER_SYNC_BIT        0x08
-#define GLOSSY_HEADER_SEQN_MASK       0x07
 #define GLOSSY_HEADER_LEN             sizeof(uint8_t)
 #define GLOSSY_RELAY_CNT_LEN          sizeof(uint8_t)
 #define GLOSSY_IS_ON()                (get_state() != GLOSSY_STATE_OFF)
@@ -158,7 +159,6 @@ PROCESS_NAME(glossy_process);
  *                   zero otherwise.
  * \param tx_max_    Maximum number of transmissions (N).
  * \param header_    Application-specific header (value between 0x0 and 0xf).
- * \param header_    Ignore app header of received packets (receive everything)
  * \param t_start_   Time instant at which Glossy must turn on the radio
  *                   (and send the packet if initiator)
  * \param t_stop_    Time instant at which Glossy must stop, in case it is
@@ -171,7 +171,7 @@ PROCESS_NAME(glossy_process);
 void glossy_start(struct glossy *glossy_,
     uint8_t *data_, uint8_t data_len_, uint8_t initiator_, uint8_t channel_,
     uint8_t sync_, uint8_t tx_max_, uint8_t stop_on_sync_,
-    uint8_t header_, uint8_t ignore_type_,
+    uint8_t header_,
     rtimer_clock_t t_start_, rtimer_clock_t t_stop_, rtimer_callback_t cb_,
     struct rtimer *rtimer_, void *ptr_);
 

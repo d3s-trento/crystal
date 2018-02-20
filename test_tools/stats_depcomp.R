@@ -11,29 +11,17 @@ CRYSTAL_BAD_CRC = 2
 CRYSTAL_HIGH_NOISE = 3
 CRYSTAL_SILENCE = 4
 
-
 ssum = read.table("send_summary.log", header=T, colClasses=c("numeric"))
 rsum = read.table("recv_summary.log", header=T, colClasses=c("numeric"))
 recv = read.table("recv.log", header=T, colClasses=c("numeric"))
 send = read.table("send.log", header=T, colClasses=c("numeric"))
-asend = read.table("app_send.log", header=T, colClasses=c("numeric"))
 energy = read.table("energy.log", header=T, colClasses=c("numeric"))
 energy_tf = read.table("energy_tf.log", header=T, colClasses=c("numeric"))
 energy = merge(energy, energy_tf, by=c("epoch", "node"))
 
 params = read.table("params_tbl.txt", header=T)
 SINK = params$sink[1]
-conc_senders = params$senders
-message("Sink node: ", SINK, " concurrent senders: ", conc_senders)
-
-payload_length = 0
-if ("payload" %in% names(params)) {
-    payload_length = params$payload
-}
-message("Payload length: ", payload_length)
-
-CRYSTAL_DATA_LEN = 3 + payload_length
-
+message("Sink node: ", SINK)
 
 message("Starting epoch per node")
 start_epoch = setNames(aggregate(epoch ~ dst, rsum, FUN=min), c("node", "epoch"))
@@ -44,8 +32,8 @@ setNames(aggregate(node ~ epoch, start_epoch, FUN=length), c("epoch", "n_nodes")
 
 message("Max starting epoch: ", max(start_epoch$epoch))
 
-#SKIP_END_EPOCHS = 30
-SKIP_END_EPOCHS = 1
+SKIP_END_EPOCHS = 30
+#SKIP_END_EPOCHS = 1
 message("SKIPPING last ", SKIP_END_EPOCHS, " epochs!")
 
 min_epoch = max(c(params$start_epoch, min(rsum$epoch))+1)
@@ -61,8 +49,6 @@ e = recv$epoch
 recv = recv[e>=min_epoch & e<=max_epoch,]
 e = send$epoch
 send = send[e>=min_epoch & e<=max_epoch,]
-e = asend$epoch
-asend = asend[e>=min_epoch & e<=max_epoch,]
 e = ssum$epoch
 ssum = ssum[e>=min_epoch & e<=max_epoch,]
 e = rsum$epoch
@@ -83,7 +69,7 @@ sent_anything = unique(send$src)
 message("Nodes that logged sending something: ", length(sent_anything))
 print(sort(sent_anything))
 
-not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$length != CRYSTAL_DATA_LEN) | (recv$err_code != 0)
+not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$err_code != 0)
 wrong_packets = not_packets & (recv$err_code %in% c(CRYSTAL_BAD_DATA, CRYSTAL_BAD_CRC))
 
 recv_from = unique(recv[!not_packets, c("src")])
@@ -106,31 +92,7 @@ sink_recv = recv[recv$dst==SINK,]
 duplicates = duplicated(sink_recv[,c("src", "seqn")])
 message("Duplicates: ", sum(duplicates))
 
-sink_recv_nodup = sink_recv[!duplicates,]
 sink_rsum = rsum[rsum$dst==SINK,]
-
-sendrecv = merge(asend[,c("src", "seqn", "epoch")], sink_recv_nodup[,c("src", "seqn", "epoch", "n_ta")], by=c("src", "seqn"), all.x=T, suffixes=c(".tx", ".rx"))
-total_sent = dim(unique(send[c("src", "seqn")]))[1]
-total_packets = dim(asend)[1]
-nodups_recv = dim(sendrecv[!is.na(sendrecv$epoch.rx),])[1] # in sendrecv we don't have packets "received but not sent"
-PDR = nodups_recv/total_sent
-real_PDR = nodups_recv/total_packets
-message("Total messages: ", total_packets, " sent: ", total_sent, " received: ", nodups_recv , " OLD_PDR: ", PDR, " real PDR: ", real_PDR)
-
-lost = sendrecv[is.na(sendrecv$epoch.rx),c("src", "seqn", "epoch.tx")]
-message("Not delivered packets: ", dim(lost)[1])
-lost
-
-notsent = merge(asend[,c("src", "seqn", "epoch")], send[,c("src", "seqn", "epoch")], by=c("src", "seqn"), all.x=T, suffixes=c(".app", ".cr"))
-notsent = notsent[is.na(notsent$epoch.cr),]
-message("Not sent packets: ", dim(notsent)[1])
-print(notsent)
-
-message("Epochs with loss:")
-sort(unique(lost$epoch.tx))
-
-message("Packets received not in the epoch they were sent")
-print(sendrecv[!is.na(sendrecv$epoch.rx) & sendrecv$epoch.tx != sendrecv$epoch.rx,])
 
 message("TX and RX records")
 s = setNames(aggregate(epoch ~ ssum$src, ssum, FUN=length), c("node", "count_tx"))
@@ -142,27 +104,6 @@ print(setNames(aggregate(sync_missed ~ ssum$sync_missed, ssum, length), c("num_m
 
 message("Nodes that lost a sync message more than twice in a row")
 sort(unique(ssum[ssum$sync_missed>2,c("src")]))
-
-# NA means dynamic
-if (is.na(conc_senders) | conc_senders > 0) {
-
-    message("Total and unique messages received by sink")
-
-    rx_uniq = setNames(aggregate(
-          paste(src,seqn) ~ epoch,
-          sink_recv, 
-            FUN=function(x) length(unique(x))),
-          c("epoch", "uniq_rx"))                
-    rx_dups = setNames(aggregate(
-          sink_recv$src, 
-          list(epoch=sink_recv$epoch), 
-            FUN=function(x) (length(x) - length(unique(x)))),
-          c("epoch", "dups"))
-    acked = setNames(aggregate(
-          send$acked, 
-          list(epoch=send$epoch), 
-            FUN=sum),
-          c("epoch", "acks"))
 
     maxta = setNames(aggregate(
           rsum$n_ta, 
@@ -176,71 +117,23 @@ if (is.na(conc_senders) | conc_senders > 0) {
             FUN=min),
           c("epoch", "n_ta_min"))
 
-    senders = setNames(aggregate(
-          paste(src,seqn) ~ epoch,
-          send,
-            FUN=function(x) length(unique(x))),
-          c("epoch", "n_pkt"))
-    
     avg_rxta = setNames(aggregate(
-          sink_recv_nodup$n_ta, 
-          list(epoch=sink_recv_nodup$epoch), 
+          sink_recv$n_ta, 
+          list(epoch=sink_recv$epoch), 
             FUN=mean),
           c("epoch", "avg_rxta"))
 
     avg_rxta$avg_rxta <- avg_rxta$avg_rxta + 1
 
-    txrx = merge(senders, rx_uniq, all=T)
-    txrx[is.na(txrx$uniq_rx), c("uniq_rx")] <- c(0) # no receives means zero receives
-
     deliv = merge(
                 merge(
                     merge(
-                        merge(
-                            merge(
-                                merge(txrx, rx_dups, all=T),
-                                minta, all=T),
-                            maxta, all=T),
-                        acked, all=T),
+                       minta,
+                       maxta, all=T),
                     setNames(sink_rsum[,c("epoch", "n_ta")], c("epoch", "n_ta_sink")), all=T),
                 avg_rxta, all=T)
 
-    rownames(deliv) <- deliv$epoch
-
-    deliv[is.na(deliv$n_pkt), "n_pkt"] <- 0
-    deliv[is.na(deliv$uniq_rx), "uniq_rx" ] <- 0
-    deliv[is.na(deliv$dups),"dups"] <- 0
-    print(deliv[,c("epoch", "n_pkt", "uniq_rx", "acks", "dups", "n_ta_sink", "n_ta_min", "n_ta_max", "avg_rxta")])
-
-    incompl = deliv[deliv$uniq_rx<deliv$n_pkt, ]
-    incompl_epochs = sort(unique(incompl$epoch))
-    message("Epochs with incomplete receive: ", length(incompl_epochs))
-    print(incompl_epochs)
-
-    #message("Distribution of tx attempts required")
-    #print(setNames(aggregate(epoch ~ real_send$n_tx, real_send, FUN=length), c("n_tx", "cases")))
-    message("Distribution of the number of packets per epoch")
-    nsndr_hist = setNames(aggregate(epoch ~ deliv$n_pkt, deliv, FUN=length), c("n_pkt", "cases"))
-    print(nsndr_hist)
-    message("Distribution of the number of unique RX per epoch")
-    uniq_rx_hist = setNames(aggregate(epoch ~ deliv$uniq_rx, deliv, FUN=length), c("uniq_rx", "cases"))
-    print(uniq_rx_hist)
-
-    if (!is.na(conc_senders)) {
-        full_epochs = sum(deliv$n_pkt==conc_senders, na.rm=T)
-        message("Distribution of TAs required (at sink), based only on ", full_epochs, " epochs with all ", conc_senders, " senders")
-        if (full_epochs != 0) {
-            ta_hist = setNames(aggregate(epoch ~ deliv$n_ta_sink, deliv, subset=deliv$n_pkt==conc_senders, FUN=length), c("n_ta_sink", "cases"))
-            print(ta_hist)
-            write.table(ta_hist, "ta_hist.txt", row.names=F)
-        } else {
-            message("Not a single epoch with ", conc_senders, " senders")
-        }
-    }
-} else {
-    incompl_epochs = c() # all epochs are complete if there are no senders
-}
-
+    print(deliv[,c("epoch", "n_ta_sink", "n_ta_min", "n_ta_max", "avg_rxta")])
 
 energy_pernode = setNames(aggregate(ontime ~ energy$node, energy, mean), c("node", "ontime"))
 
@@ -311,25 +204,6 @@ ggplot(data=short_s_pernode, aes(x=as.factor(node), y=n_compl_recv_s)) +
     ggtitle("Ratio of S phases with complete receive") +
     theme_bw()
 
-if (conc_senders>0) {
-    short_t_pernode = setNames(aggregate(rx_cnt>=params$n_tx_t ~ recv$dst, recv, sum), c("node", "n_short_t"))
-    n_recv_pernode =  setNames(aggregate(rx_cnt>0 ~ recv$dst, recv, sum), c("node", "n_recv_t"))
-    short_t_pernode = merge(short_t_pernode, n_recv_pernode)
-    short_t_pernode = within(short_t_pernode, n_compl_recv_t <- n_short_t/n_recv_t)
-    short_t_pernode[!is.finite(short_t_pernode$n_compl_recv_t), c("n_compl_recv_t")] <- NA 
-
-    p = ggplot(data=en_short_t, aes(x=as.factor(node), y=tf_t)) + 
-    geom_boxplot(outlier.colour="gray30", outlier.size=1) +
-    ggtitle("tf_t (epoch averages)") +
-    theme_bw()
-    print(p)
-    p = ggplot(data=short_t_pernode, aes(x=as.factor(node), y=n_compl_recv_t)) + 
-    geom_point() +
-    ggtitle("Ratio of T phases with complete receive") +
-    theme_bw()
-    print(p)
-}
-
 ggplot(data=en_short_a, aes(x=as.factor(node), y=tf_a)) + 
     geom_boxplot(outlier.colour="gray30", outlier.size=1) +
     ggtitle("tf_a (epoch averages)") +
@@ -351,8 +225,6 @@ message("Radio ON per node")
 energy_pernode
 
 write.table(energy_pernode, "pernode_energy.txt", row.names=F)
-
-if (is.nan(PDR)) PDR = NA
 
 
 # -- Per-node and advanced stats ------------------------------------------------------
@@ -443,30 +315,6 @@ rm(apdr_pernode)
 
 
 
-
-more_tas = 0
-fewer_tas = 0
-# counting number of extra or missing TAs (network-wise, as seen by the sink)
-if (!is.na(conc_senders)) {
-    if (conc_senders>0) {
-        tas_diff = deliv$n_ta_sink - (deliv$n_sndr + params$n_empty)
-    } else {
-        tas_diff = sink_rsum$n_ta - params$n_empty
-    }
-    more_tas = sum(tas_diff[which(tas_diff>0)])/n_epochs
-    fewer_tas = -sum(tas_diff[which(tas_diff<0)])/n_epochs
-}
-
-message("Mean # extra TAs: ", more_tas)
-message("Mean # missing TAs: ", fewer_tas)
-
-rxta_mean = NA
-rxta_max = NA
-if (conc_senders>0) {
-    rxta_mean = mean(sink_recv_nodup$n_ta) + 1
-    rxta_max = max(sink_recv_nodup$n_ta) + 1
-}
-message("Mean/max delay (in number of TAs): ", rxta_mean, " ", rxta_max)
 
 # nodes that go to sleep earlier or later than the sink
 
@@ -561,109 +409,5 @@ message("Max noise: ", noise_max)
 write.table(pernode, "pernode.txt", row.names=F)
 
 
-stats = data.frame(pdr=real_PDR, oldpdr=PDR, 
-                   n_pkt=total_packets, n_delivered=nodups_recv,
-                   ontime_min=min_ontime, ontime_mean=mean_ontime, ontime_max=max_ontime, 
-                   ta_min=min(rsum$n_ta), ta_mean=mean(rsum$n_ta), ta_max=max(rsum$n_ta),
-                   s_pdr_min=min_s_pdr,s_pdr_mean=mean_s_pdr,s_pdr_max=max_s_pdr,
-                   s_pdr_total_min=min_s_pdr_total,s_pdr_total_mean=mean_s_pdr_total,s_pdr_total_max=max_s_pdr_total,
-                   a_pdr_min=min_a_pdr,a_pdr_mean=mean_a_pdr,a_pdr_max=max_a_pdr,
-                   hops_mean=hops_mean,
-                   hops_max=hops_max,
-                   skew_mean=skew_mean,
-                   skew_var_mean=skew_var_mean,
-                   extra_tas_mean=more_tas, missing_tas_mean=fewer_tas,
-                   n_early_sleepers_mean=mean_early_sleepers, n_early_sleepers_max=max_early_sleepers, 
-                   n_late_sleepers_mean=mean_late_sleepers, n_late_sleepers_max=max_late_sleepers, 
-                   n_early_sleep_epochs_mean=mean_early_sleep_epochs, n_early_sleep_epochs_max=max_early_sleep_epochs,
-                   n_late_sleep_epochs_mean=mean_late_sleep_epochs, n_late_sleep_epochs_max=max_late_sleep_epochs,
-                   tons_min = min(energy_pernode$ton_s, na.rm=T), tons_mean = mean(energy_pernode$ton_s, na.rm=T), tons_max = max(energy_pernode$ton_s, na.rm=T),
-                   tont_min = min(energy_pernode$ton_t, na.rm=T), tont_mean = mean(energy_pernode$ton_t, na.rm=T), tont_max = max(energy_pernode$ton_t, na.rm=T),
-                   tona_min = min(energy_pernode$ton_a, na.rm=T), tona_mean = mean(energy_pernode$ton_a, na.rm=T), tona_max = max(energy_pernode$ton_a, na.rm=T),
-                   ton_total_min = min(energy_pernode$ton_total, na.rm=T), ton_total_mean = ton_total_mean, ton_total_max = max(energy_pernode$ton_total, na.rm=T),
-                   tfs_min = min(energy_pernode$tf_s, na.rm=T), tfs_mean = mean(energy_pernode$tf_s, na.rm=T), tfs_max = max(energy_pernode$tf_s, na.rm=T),
-                   tft_min = min(energy_pernode$tf_t, na.rm=T), tft_mean = mean(energy_pernode$tf_t, na.rm=T), tft_max = max(energy_pernode$tf_t, na.rm=T),
-                   tfa_min = min(energy_pernode$tf_a, na.rm=T), tfa_mean = mean(energy_pernode$tf_a, na.rm=T), tfa_max = max(energy_pernode$tf_a, na.rm=T),
-                   noise_mean=noise_mean, noise_max=noise_max,
-                   s_compl_recv = s_compl_recv,
-                   t_compl_recv = t_compl_recv,
-                   n_lazy_nodes = length(lazy_nodes),
-                   rxta_mean = rxta_mean, rxta_max = rxta_max
-                   )
-write.table(stats, "summary.txt", row.names=F)
-
 max_cca_busy = max(rsum$cca_busy)
-
-pdf("cca_busy_ecdf.pdf", width=12, height=8)
-ggplot(data=data.frame(cca_busy=rsum[rsum$dst==SINK & !(rsum$epoch %in% incompl_epochs), c("cca_busy")])) + 
-    stat_ecdf(aes(x=cca_busy)) +
-    xlim(0, max_cca_busy) +    
-    ggtitle("ECDF of cca_busy counter for complete epochs") +
-    theme_bw()
-
-if (length(incompl_epochs) != 0) {
-    #print(rsum[rsum$dst==SINK & rsum$epoch %in% incompl_epochs,])
-    p=ggplot(data=data.frame(cca_busy=rsum[rsum$dst==SINK & rsum$epoch %in% incompl_epochs, c("cca_busy")])) + 
-        stat_ecdf(aes(x=cca_busy)) + 
-        xlim(0, max_cca_busy) +    
-        ggtitle("ECDF of cca_busy counter for incomplete epochs") +
-        theme_bw()
-    print(p)
-}
-dev.off()
-
-
-# general T phase success rate
-
-nodes = c(senders, SINK)
-pernode1 = data.frame(node=nodes, n_tx=c(0), n_rx=c(0), T_SR=NA)
-if (length(senders)>0 && conc_senders>0) {
-    n_tas_with_tx = 0
-    for (e in min_epoch:max_epoch) {
-        cur_t = ssum[ssum$epoch==e & ssum$n_tx>0,] # nodes who transmitted something during current epoch
-        cur_r = recv[recv$epoch==e & recv$n_ta==0,] # nodes who received something during the first T
-        nodes_who_received = cur_r$dst
-        #print(sort(nodes_who_received))
-        nodes_who_were_heard = unique(cur_r$src)
-        nodes_who_sent = cur_t$src  # nodes who transmitted during current epoch and TA
-        #print(sort(nodes_who_sent))
-
-        # updating the set of sending nodes with those who were heard but didn't log the TX
-        # (sometimes it happens in FBK)
-        nodes_who_sent = unique(c(nodes_who_sent, nodes_who_were_heard))
-        
-        s = pernode1$node %in% nodes_who_received
-        pernode1[s,]$n_rx = pernode1[s,]$n_rx + 1
-        s = pernode1$node %in% nodes_who_sent
-        pernode1[s,]$n_tx = pernode1[s,]$n_tx + 1
-        
-        if (length(nodes_who_sent)>0)
-            n_tas_with_tx = n_tas_with_tx + 1
-    }
-
-    n_tx_total = sum(pernode1$n_tx)
-    n_rx_total = sum(pernode1$n_rx)
-
-    #print(n_tas_with_tx)
-    pernode1 = within(pernode1, T_SR<-n_rx/(n_tas_with_tx-n_tx))
-    pernode1[is.infinite(pernode1$T_SR), c("T_SR")] <- NA
-    print(pernode1)
-
-    T_success_rate = mean(pernode1$T_SR, na.rm=T)
-    T_sink_success_rate = pernode1[pernode1$node==SINK,]$T_SR
-    T_num_tx = n_tas_with_tx
-    T_sink_num_rx = pernode1[pernode1$node==SINK,]$n_rx
-} else {
-    T_success_rate = NA
-    T_sink_success_rate = NA
-    T_num_tx = 0
-    T_sink_num_rx = 0
-}
-#print(n_tas_with_tx)
-
-message("Success rate of T phase: ", T_success_rate)
-message("Success rate of T phase for the sink: ", T_sink_success_rate)
-stats_T = data.frame(T_success_rate=T_success_rate, T_sink_success_rate=T_sink_success_rate, T_num_tx=T_num_tx, T_sink_num_rx=T_sink_num_rx)
-write.table(stats_T, "summary_T.txt", row.names=F)
-write.table(pernode1[c("node", "T_SR")], "pernode_T.txt", row.names=F)
 

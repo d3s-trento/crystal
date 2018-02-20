@@ -73,7 +73,8 @@
  * Guard-time when clock skew is not yet estimated
  */
 //#define CRYSTAL_INIT_GUARD  (RTIMER_SECOND / 50)     //  20 ms, IPSN'18
-#define CRYSTAL_INIT_GUARD  (RTIMER_SECOND / 100)    //  10 ms
+//#define CRYSTAL_INIT_GUARD  (RTIMER_SECOND / 100)    //  10 ms
+#define CRYSTAL_INIT_GUARD  (RTIMER_SECOND / 66)    //  15 ms
 
 /**
  * Duration during bootstrapping at receivers.
@@ -83,8 +84,15 @@
 typedef uint8_t crystal_addr_t; // IPSN'18
 //typedef uint16_t crystal_addr_t;
 
-//typedef uint8_t crystal_epoch_t; // NOT SUPPORTED !
-typedef uint16_t crystal_epoch_t; // IPSN'18
+//typedef uint16_t crystal_epoch_t; // IPSN'18
+
+typedef uint8_t crystal_epoch_t; // Needs a wrap-around protection!
+
+#define CRYSTAL_GET_EPOCH(value) ((value) & 0x7f)  // 7 bit for the epoch
+#define CRYSTAL_GET_BS_DONE(value) ((value) & 0x80) // 1 bit bootstrap flag
+#define CRYSTAL_BS_DONE_FLAG 0x80
+#define CRYSTAL_INC_EPOCH(value) (value) = (((value) & 0x80) | (((value) + 1) & 0x7f))
+
 
 
 /**

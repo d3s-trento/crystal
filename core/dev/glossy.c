@@ -51,7 +51,6 @@ static rtimer_callback_t cb;
 static struct rtimer *rtimer;
 static void *ptr;
 static unsigned short ie1, ie2, p1ie, p2ie, tbiv;
-static unsigned short glossy_seqn;
 
 static rtimer_clock_t T_slot_h, T_rx_h, T_w_rt_h, T_tx_h, T_w_tr_h, t_ref_l, T_offset_h, t_first_rx_l;
 #if GLOSSY_SYNC_WINDOW
@@ -59,15 +58,14 @@ static unsigned long T_slot_h_sum;
 static uint8_t win_cnt;
 #endif /* GLOSSY_SYNC_WINDOW */
 static uint8_t relay_cnt, t_ref_l_updated;
-static uint8_t stop_on_sync, ignore_type;
+static uint8_t stop_on_sync;
 
 static struct glossy *glossy_object;
 static unsigned long rtx_when_started;
 static uint16_t cca_last_check, cca_busy_cnt;
 static uint16_t volatile cca_counting;
 static rtimer_clock_t t_start_l;
-static uint8_t channel, app_header, rx_data_len, rx_bad_crc;
-static uint8_t expected_header;
+static uint8_t channel, hdr_and_sync_bit, rx_data_len, rx_bad_crc;
 
 /* --------------------------- Radio functions ---------------------- */
 static inline void radio_flush_tx(void) {
@@ -229,7 +227,7 @@ timerb1_interrupt(void)
                 // set the packet length field to the appropriate value
                 GLOSSY_LEN_FIELD = packet_len_tmp;
                 // set the header field
-                GLOSSY_HEADER_FIELD = expected_header;
+                GLOSSY_HEADER_FIELD = GLOSSY_HEADER | hdr_and_sync_bit;
                 if (sync) {
                   GLOSSY_RELAY_CNT_FIELD = n_timeouts * GLOSSY_INITIATOR_TIMEOUT;
                 }
@@ -447,7 +445,7 @@ void glossy_start(struct glossy *glossy_,
     uint8_t *data_, uint8_t data_len_, uint8_t initiator_,
     uint8_t channel_,
     uint8_t sync_, uint8_t tx_max_, uint8_t stop_on_sync_,
-    uint8_t header_, uint8_t ignore_type_,
+    uint8_t header_,
     rtimer_clock_t t_start_, rtimer_clock_t t_stop_, rtimer_callback_t cb_,
     struct rtimer *rtimer_, void *ptr_) {
   // copy function arguments to the respective Glossy variables
@@ -463,13 +461,14 @@ void glossy_start(struct glossy *glossy_,
   sync = sync_ != 0;
   stop_on_sync = stop_on_sync_;
   tx_max = tx_max_;
+  hdr_and_sync_bit = initiator ? (header_ & GLOSSY_APP_HEADER_MASK) : 0; // only set for the initiator
+  if (sync)
+    hdr_and_sync_bit |= GLOSSY_HEADER_SYNC_BIT;
   t_stop = t_stop_;
   t_start_l = t_start_;
   cb = cb_;
   rtimer = rtimer_;
   ptr = ptr_;
-  ignore_type = ignore_type_;
-  app_header = (header_ & 0x0f) << 4;
 
   // initialize Glossy variables
   tx_cnt = 0;
@@ -487,6 +486,8 @@ void glossy_start(struct glossy *glossy_,
     packet_len = packet_len_tmp;
     // set the packet length field to the appropriate value
     GLOSSY_LEN_FIELD = packet_len_tmp;
+    // set the header field
+    GLOSSY_HEADER_FIELD = GLOSSY_HEADER | hdr_and_sync_bit;
   } else {
     // packet length not known yet (only for receivers)
     packet_len = 0;
@@ -494,14 +495,6 @@ void glossy_start(struct glossy *glossy_,
   if (initiator) {
     // initiator: copy the application data to the data field
     memcpy(&GLOSSY_DATA_FIELD, data, data_len);
-
-    glossy_seqn = (glossy_seqn + 1) & GLOSSY_HEADER_SEQN_MASK;
-
-    // we expect to recv the same header as we send
-    expected_header = app_header | (sync << 3) | glossy_seqn; 
-    // set the header field
-    GLOSSY_HEADER_FIELD = expected_header;
-
     // set Glossy state
     glossy_state = GLOSSY_STATE_RECEIVED;
   } else {
@@ -546,7 +539,7 @@ uint8_t get_data_len(void) {
   return rx_data_len;
 }
 uint8_t get_app_header(void) {
-  return (expected_header & GLOSSY_APP_HEADER_MASK) >> 4;
+  return hdr_and_sync_bit & GLOSSY_APP_HEADER_MASK;
 }
 
 uint8_t get_rx_cnt(void) {
@@ -692,7 +685,7 @@ inline void glossy_begin_rx(void) {
   // read the second byte (i.e., the header field) from the RXFIFO
   FASTSPI_READ_FIFO_BYTE(GLOSSY_HEADER_FIELD);
   // keep receiving only if it has the right header
-  if (!ignore_type && ((GLOSSY_HEADER_FIELD & GLOSSY_APP_HEADER_MASK) != app_header)) {
+  if ((GLOSSY_HEADER_FIELD & GLOSSY_HEADER_MASK) != GLOSSY_HEADER) {
     // packet with a wrong header: abort packet reception
     radio_abort_rx();
 #if GLOSSY_DEBUG
@@ -729,9 +722,19 @@ inline void glossy_end_rx(void) {
   // read the remaining bytes from the RXFIFO
   FASTSPI_READ_FIFO_NO_WAIT(&packet[bytes_read], packet_len_tmp - bytes_read + 1);
   bytes_read = packet_len_tmp + 1;
+#if COOJA
+  if ((GLOSSY_CRC_FIELD & FOOTER1_CRC_OK) && ((GLOSSY_HEADER_FIELD & GLOSSY_HEADER_MASK) == GLOSSY_HEADER)) {
+#else
   if (GLOSSY_CRC_FIELD & FOOTER1_CRC_OK) {
+#endif /* COOJA */
+    hdr_and_sync_bit = GLOSSY_HEADER_FIELD & 0x0f; // 0xf is app header + sync bit
+    recv_sync = (hdr_and_sync_bit & GLOSSY_HEADER_SYNC_BIT) != 0;
     // packet correctly received
-    recv_sync = (GLOSSY_HEADER_FIELD & GLOSSY_HEADER_SYNC_BIT) != 0;
+    if (sync && recv_sync) {
+      // increment relay_cnt field
+      GLOSSY_RELAY_CNT_FIELD++;
+    }
+//#if GLOSSY_STOP_ON_SYNC_MISMATCH
     if (sync != recv_sync) {
       // received sync packet while expecting a non-sync one or vice versa
       // drop and stop
@@ -740,21 +743,16 @@ inline void glossy_end_rx(void) {
       // XXX: note that in this case the packet data is not copied to the
       // application buffer. It is not good but it is ok for Crystal.
     }
-    else {
-      if (tx_cnt == tx_max) {
-        // no more Tx to perform: stop Glossy
-        radio_off();
-        glossy_state = GLOSSY_STATE_OFF;
-      } 
-      else {
-        if (sync) {
-          // increment relay_cnt field
-          GLOSSY_RELAY_CNT_FIELD++;
-        }
-        // write Glossy packet to the TXFIFO
-        radio_write_tx();
-        glossy_state = GLOSSY_STATE_RECEIVED;
-      }
+    else
+//#endif
+    if (tx_cnt == tx_max) {
+      // no more Tx to perform: stop Glossy
+      radio_off();
+      glossy_state = GLOSSY_STATE_OFF;
+    } else {
+      // write Glossy packet to the TXFIFO
+      radio_write_tx();
+      glossy_state = GLOSSY_STATE_RECEIVED;
     }
     if (rx_cnt == 0) {
       // first successful reception:
@@ -763,12 +761,9 @@ inline void glossy_end_rx(void) {
       if (sync && recv_sync) {
         relay_cnt = GLOSSY_RELAY_CNT_FIELD - 1;
       }
-      if (!initiator) {
-        expected_header = GLOSSY_HEADER_FIELD; // in the following messages we expect to see the same header
-      }
     }
     rx_cnt++;
-    if (sync && recv_sync && expected_header == GLOSSY_HEADER_FIELD) {
+    if (sync && recv_sync) {
       estimate_slot_length(t_rx_stop_tmp);
     }
     t_rx_stop = t_rx_stop_tmp;
@@ -803,7 +798,7 @@ inline void glossy_begin_tx(void) {
     memcpy(data, &GLOSSY_DATA_FIELD, data_len);
     rx_data_len = data_len; // to indicate that the received data was actually copied to the data buffer
   }
-  if ((sync) && (T_slot_h) && (!t_ref_l_updated) && (rx_cnt) && expected_header == GLOSSY_HEADER_FIELD) {
+  if ((sync) && (T_slot_h) && (!t_ref_l_updated) && (rx_cnt)) {
     // compute the reference time after the first reception (higher accuracy)
     compute_sync_reference_time();
   }

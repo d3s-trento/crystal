@@ -177,6 +177,21 @@ init_ports(void)
   P6OUT = 0;
 #endif
 
+  /* set recommended pin config */
+  //P1OUT = 0;
+  //P1DIR = 0xe0;       // P1.1: UART BSL (input)
+  //P2OUT = 0x30;       // P2.4 and 2.5: output high
+  //P2DIR = 0x7b;       // P2.2: UART BSL (input), P2.8: user_int (button)
+  //P3OUT = 0;
+  //P3DIR = 0xf1;       // P3.0: not connected, P3.1 - 3.3: radio (don't change), P3.4 & 3.5: UART0, P3.6 & 3.7: UART1
+  //P4OUT = 0xfd;       // P4.4 - 4.7: output high (P4.5: V_REG for cc2420)
+  //P4DIR = 0xfd;       // all but P4.1 are outputs
+  //P5OUT = 0xff;
+  //P5DIR = 0xff;       // unconnected pins and LEDs (active low!)
+  //P6OUT = 0;   
+  //P6DIR = 0xcf;       // extension header + light sensors (P6.4 and 6.5)
+  
+
   P1IE = 0;
   P2IE = 0;
 }

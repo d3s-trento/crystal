@@ -63,9 +63,11 @@ leds_arch_get(void)
 void
 leds_arch_set(unsigned char leds)
 {
+#if LEDS_CONF_ON
   LEDS_PxOUT = (LEDS_PxOUT & ~(LEDS_CONF_RED|LEDS_CONF_GREEN|LEDS_CONF_YELLOW))
     | ((leds & LEDS_RED) ? 0 : LEDS_CONF_RED)
     | ((leds & LEDS_GREEN) ? 0 : LEDS_CONF_GREEN)
     | ((leds & LEDS_YELLOW) ? 0 : LEDS_CONF_YELLOW);
+#endif
 }
 /*---------------------------------------------------------------------------*/

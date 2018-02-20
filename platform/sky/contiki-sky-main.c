@@ -84,7 +84,9 @@ main(int argc, char **argv)
 #endif
 
   leds_on(LEDS_GREEN);
+#if !DISABLE_DS2411
   ds2411_init();
+#endif
 
   leds_on(LEDS_BLUE);
   xmem_init();

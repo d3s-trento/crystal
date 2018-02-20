@@ -33,5 +33,5 @@ echo "-- build log --------" >> $ENV
 make 2>&1 | tee -a $ENV
 msp430-objcopy -O ihex crystal.sky crystal.sky.ihex | tee -a $ENV
 
-echo "-- sndtbl.c --------" >> $ENV
-cat sndtbl.c >> $ENV
+#echo "-- sndtbl.c --------" >> $ENV
+#cat sndtbl.c >> $ENV
