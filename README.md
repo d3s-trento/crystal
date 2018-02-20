@@ -11,6 +11,8 @@ Crystal got the [2nd prize](https://iti-testbed.tugraz.at/blog/page/11/ewsn-18-d
 ## Status
 Currently the protocol is implemented for the TMote Sky platform only. Porting it to more modern platforms is in our near future plans.
 
+The **master** branch is the main development branch of Crystal. It integrates several improvements to the protocol since the IPSN'18 submission. Please contact us in case you need the exact code we used in IPSN'18 experiments. The version we used for the EWSN'18 Dependability Competition is instead published here for reference (**depcomp18** branch). It contains several competition-specific tweaks and will not be updated in the future.
+
 ***Disclaimer:*** *Although we tested the code extensively, Crystal is a research prototype that likely contains bugs. We take no responsibility for and give no warranties in respect of using the code.*
 
 ## Build instructions
