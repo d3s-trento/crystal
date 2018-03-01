@@ -118,9 +118,9 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
     else:
         cflags += ["-DDISABLE_UART=1"]
 
-    if testbed in ("indriya", "fbk"):
+    if testbed in ("indriya", "fbk", "twist"):
         cflags += ["-DTINYOS_SERIAL_FRAMES=1"]
-    if testbed in ("indriya", "fbk", "flock"):
+    if testbed in ("indriya", "fbk", "flock", "twist"):
         cflags += ["-DTINYOS_NODE_ID=1"]
     if testbed == "indriya":
         cflags += ["-DSHORT_LOGS=1"]

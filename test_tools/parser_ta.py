@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 import sys
 import re
 import argparse
@@ -22,6 +22,7 @@ record_pattern = {
         #"cooja":"^(?P<time>\d+):(?P<self_id>\d+):%s", # Cooja without GUI
         "fbk":"^%s\s+(?P<time>\d+)\s+[0-9-]+\s+[0-9:]+\s(?P<self_id>\d+)\s+\d+$", # FBK Motelab
         "indriya":"^%s\s+[0-9-]+\s+[0-9:]+\s40(?P<self_id>\d+)\s+(?P<time>\d+)\s+\d+$", # Indriya Motelab
+        "twist":"^(?P<time>\d+[.]\d+)\s+(?P<self_id>\d+)\s+%s", # TWIST testbed
         "flocklab":"^(?P<time>\d+[.]\d+)[,][0-9]+[,](?P<self_id>\d+)[,][a-z][,]%s$", # FlockLab Testbed
         }.get(record_format, None)
 
@@ -38,6 +39,8 @@ def convert_time(time):
     elif record_format == "indriya":
         return int(time)*1000
     elif record_format == "flocklab":
+        return float(time)*1000000
+    elif record_format == "twist":
         return float(time)*1000000
     elif record_format == "cooja":
         minutes,rest = time.split(":")
