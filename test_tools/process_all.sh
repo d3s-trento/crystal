@@ -1,6 +1,8 @@
 #!/bin/bash
 TOOLPATH=`dirname $0`
 
+echo Base path: $TOOLPATH
+
 TESTBED=`head -n1 testbed.txt`
 
 if [ $TESTBED = indriya ]
@@ -45,7 +47,7 @@ then
   rm -f *.dat messages.pickle.gz
 elif [ $TESTBED = twist ]
 then
-  ../../$TOOLPATH/twist_parser.py < raw.log > log.cleaned
+  $TOOLPATH/twist_parser.py < raw.log > log.cleaned
 fi
 }
 
@@ -67,13 +69,13 @@ do
                 preparse
 		if [ $TESTBED = indriya ]
 		then
-			python ../../$TOOLPATH/parser_short.py --format $TESTBED
-			Rscript ../../$TOOLPATH/stats_short.R > stats_out.txt
+			python $TOOLPATH/parser_short.py --format $TESTBED
+			Rscript $TOOLPATH/stats_short.R > stats_out.txt
 		else
-			../../$TOOLPATH/parser_ta.py --format $TESTBED
-			Rscript ../../$TOOLPATH/stats_ta.R > stats_out.txt
-			#Rscript ../../$TOOLPATH/plot_all_pernode.R
+			$TOOLPATH/parser_ta.py --format $TESTBED
+			Rscript $TOOLPATH/stats_ta.R > stats_out.txt
 			grep OLD_PDR stats_out.txt
+			Rscript $TOOLPATH/plot_all_pernode.R
 			grep "Max starting epoch" stats_out.txt
 		fi
 		#rm -f log.cleaned

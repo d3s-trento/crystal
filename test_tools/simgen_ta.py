@@ -2,15 +2,6 @@
 import sys
 import argparse
 import traceback
-
-ap = argparse.ArgumentParser(description='Simulation generator')
-ap.add_argument('--basepath', required=False, default="../..",
-                   help='Base path')
-ap.add_argument('-c', '--config', required=False, default="params.py",
-                   help='Configuration python file')
-
-args = ap.parse_args()
-
 import os
 from collections import namedtuple, OrderedDict
 from shutil import copy, rmtree
@@ -20,7 +11,22 @@ import itertools
 import re
 import random
 
+
+run_path = os.path.dirname(sys.argv[0])
+crystal_path = os.path.dirname(run_path)
+
+
+ap = argparse.ArgumentParser(description='Simulation generator')
+ap.add_argument('--basepath', required=False, default=crystal_path,
+                   help='Base path')
+ap.add_argument('-c', '--config', required=False, default="params.py",
+                   help='Configuration python file')
+
+args = ap.parse_args()
+
+
 basepath = args.basepath
+print "Base path:", basepath
 #apppath = os.path.join(basepath, "apps", "glossy-test")
 #apppath = os.path.join(basepath, "apps", "ta")
 apppath = os.path.join(basepath, "apps", "crystal")
@@ -164,7 +170,7 @@ defaults = {
 
 set_defaults(pars, defaults)
 
-print "using the following params"
+print "Using the following params"
 print pars
 
 globals().update(pars)
