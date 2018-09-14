@@ -76,7 +76,7 @@ static uint8_t         scan_last_ch_index;
 #define SCAN_START_CHASING_S 0
 
 static inline int get_channel_node_bootstrap(enum scan_rx rx){
-  static first_time = 1;
+  static int first_time = 1;
 
   if (first_time) {// first time 
     first_time = 0;

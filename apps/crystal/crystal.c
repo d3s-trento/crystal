@@ -72,51 +72,51 @@ static rtimer_clock_t t_wakeup;       // Time to wake up to prepare for the next
 
 static int period_skew;               // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
 
-uint8_t channel;  // current channel
+static uint8_t channel;  // current channel
 
-rtimer_clock_t estimated_ref_time;   // estimated reference time for the current epoch
-rtimer_clock_t corrected_ref_time_s; // reference time acquired during the S slot of the current epoch
-rtimer_clock_t corrected_ref_time;   // reference time acquired during the S or an A slot of the current epoch
-rtimer_clock_t skewed_ref_time;      // reference time in the local time frame
+static rtimer_clock_t estimated_ref_time;   // estimated reference time for the current epoch
+static rtimer_clock_t corrected_ref_time_s; // reference time acquired during the S slot of the current epoch
+static rtimer_clock_t corrected_ref_time;   // reference time acquired during the S or an A slot of the current epoch
+static rtimer_clock_t skewed_ref_time;      // reference time in the local time frame
 
-crystal_epoch_t epoch;        // epoch seqn received from the sink (or extrapolated)
+static crystal_epoch_t epoch;        // epoch seqn received from the sink (or extrapolated)
 
-uint16_t correct_packet; // whether the received packet is correct
+static uint16_t correct_packet; // whether the received packet is correct
 
-uint16_t skip_S;
-uint16_t n_ta_tx;      // how many times node tried to send data in the epoch
-uint16_t n_ta;         // how many "ta" sequences there were in the epoch
-uint16_t n_empty_ts;   // number of consecutive "T" phases without data
-uint16_t n_high_noise; // number of consecutive "T" phases with high noise
-uint16_t n_noacks;     // num. of consecutive "A" phases without any acks
-uint16_t n_bad_acks;   // num. of consecutive "A" phases with bad acks
-uint16_t n_all_acks;   // num. of negative and positive acks
-uint16_t sleep_order;  // sink sent the sleep command
-uint16_t n_badtype_a;  // num. of packets of wrong type received in A phase
-uint16_t n_badlen_a;   // num. of packets of wrong length received in A phase
-uint16_t n_badcrc_a;   // num. of packets with wrong CRC received in A phase
-uint16_t recvtype_s;   // type of a packet received in S phase
-uint16_t recvlen_s;    // length of a packet received in S phase
-uint16_t recvsrc_s;    // source address of a packet received in S phase
+static uint16_t skip_S;
+static uint16_t n_ta_tx;      // how many times node tried to send data in the epoch
+static uint16_t n_ta;         // how many "ta" sequences there were in the epoch
+static uint16_t n_empty_ts;   // number of consecutive "T" phases without data
+static uint16_t n_high_noise; // number of consecutive "T" phases with high noise
+static uint16_t n_noacks;     // num. of consecutive "A" phases without any acks
+static uint16_t n_bad_acks;   // num. of consecutive "A" phases with bad acks
+static uint16_t n_all_acks;   // num. of negative and positive acks
+static uint16_t sleep_order;  // sink sent the sleep command
+static uint16_t n_badtype_a;  // num. of packets of wrong type received in A phase
+static uint16_t n_badlen_a;   // num. of packets of wrong length received in A phase
+static uint16_t n_badcrc_a;   // num. of packets with wrong CRC received in A phase
+static uint16_t recvtype_s;   // type of a packet received in S phase
+static uint16_t recvlen_s;    // length of a packet received in S phase
+static uint16_t recvsrc_s;    // source address of a packet received in S phase
 
-uint32_t end_of_s_time; // timestamp of the end of the S phase, relative to the ref_time
-uint16_t ack_skew_err;  // "wrong" ACK skew
-uint16_t hopcount;
-uint16_t rx_count_s, tx_count_s;  // tx and rx counters for S phase as reported by Glossy
-uint16_t ton_s, ton_t, ton_a; // actual duration of the phases
-uint16_t tf_s, tf_t, tf_a; // actual duration of the phases when all N packets are received
-uint16_t n_short_s, n_short_t, n_short_a; // number of "complete" S, T and A phases (those counted in tf_s, tf_t and tf_a)
-uint16_t cca_busy_cnt;
+static uint32_t end_of_s_time; // timestamp of the end of the S phase, relative to the ref_time
+static uint16_t ack_skew_err;  // "wrong" ACK skew
+static uint16_t hopcount;
+static uint16_t rx_count_s, tx_count_s;  // tx and rx counters for S phase as reported by Glossy
+static uint16_t ton_s, ton_t, ton_a; // actual duration of the phases
+static uint16_t tf_s, tf_t, tf_a; // actual duration of the phases when all N packets are received
+static uint16_t n_short_s, n_short_t, n_short_a; // number of "complete" S, T and A phases (those counted in tf_s, tf_t and tf_a)
+static uint16_t cca_busy_cnt;
 
 // info about current TA
-uint16_t log_recv_seqn;
-uint16_t log_recv_src;
-uint16_t log_recv_type;
-uint16_t log_recv_length;
-uint16_t log_recv_err;
+static uint16_t log_recv_seqn;
+static uint16_t log_recv_src;
+static uint16_t log_recv_type;
+static uint16_t log_recv_length;
+static uint16_t log_recv_err;
 
-uint16_t log_send_seqn;
-uint16_t log_send_acked;
+static uint16_t log_send_seqn;
+static uint16_t log_send_acked;
 
 #define TA_DURATION (DUR_T+DUR_A+2*CRYSTAL_INTER_PHASE_GAP)
 
@@ -188,14 +188,14 @@ struct send_info {
 
 #if CRYSTAL_LOGGING
 #define MAX_LOG_TAS 100
-struct recv_info recv_t[MAX_LOG_TAS];
-int n_rec_rx; // number of receive records in the array
+static struct recv_info recv_t[MAX_LOG_TAS];
+static int n_rec_rx; // number of receive records in the array
 
-struct send_info send_t[MAX_LOG_TAS];
-int n_rec_tx; // number of send records in the array
+static struct send_info send_t[MAX_LOG_TAS];
+static int n_rec_tx; // number of send records in the array
 #endif //CRYSTAL_LOGGING
 
-void inline log_ta_rx() {
+static inline void log_ta_rx() {
 #if CRYSTAL_LOGGING
   if (n_rec_rx < MAX_LOG_TAS) {
     recv_t[n_rec_rx].n_ta = n_ta;
@@ -210,7 +210,7 @@ void inline log_ta_rx() {
 #endif //CRYSTAL_LOGGING
 }
 
-void inline log_ta_tx() {
+static inline void log_ta_tx() {
 #if CRYSTAL_LOGGING
   if (n_rec_tx < MAX_LOG_TAS) {
     send_t[n_rec_tx].n_ta = n_ta;
@@ -287,7 +287,7 @@ static rtimer_clock_t lt_set_time;
 
 #define MAX_CORRECT_HOPS 30
 
-inline int correct_hops() {
+static inline int correct_hops() {
 #if (MAX_CORRECT_HOPS>0)
   return (get_relay_cnt()<=MAX_CORRECT_HOPS);
 #else
@@ -296,7 +296,7 @@ inline int correct_hops() {
 }
 
 #define CRYSTAL_ACK_SKEW_ERROR_DETECTION 1 
-inline int correct_ack_skew(rtimer_clock_t new_ref) {
+static inline int correct_ack_skew(rtimer_clock_t new_ref) {
 #if (CRYSTAL_ACK_SKEW_ERROR_DETECTION)
   static int new_skew;
 #if (MAX_CORRECT_HOPS>0)
@@ -321,9 +321,9 @@ inline int correct_ack_skew(rtimer_clock_t new_ref) {
 }
 
 
-rtimer_callback_t timer_handler;
+static rtimer_callback_t timer_handler;
 
-char sink_timer_handler(struct rtimer *t, void *ptr) {
+static char sink_timer_handler(struct rtimer *t, void *ptr) {
   static rtimer_clock_t ref_time;
   PT_BEGIN(&pt);
 
@@ -522,7 +522,7 @@ char sink_timer_handler(struct rtimer *t, void *ptr) {
   PT_END(&pt);
 }
 
-char nonsink_timer_handler(struct rtimer *t, void *ptr) {
+static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
   static rtimer_clock_t now;
   static rtimer_clock_t offs;
   static rtimer_clock_t s_guard;
@@ -962,7 +962,7 @@ char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
 // TUNING AGC to avoid saturation in RSSI readings
 // warning: it makes the reception less reliable
-void tune_AGC_radio() {
+static void tune_AGC_radio() {
   unsigned reg_agctst;
   FASTSPI_GETREG(CC2420_AGCTST1, reg_agctst);
   FASTSPI_SETREG(CC2420_AGCTST1, (reg_agctst + (1 << 8) + (1 << 13)));
