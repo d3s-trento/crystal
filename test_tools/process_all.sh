@@ -1,5 +1,6 @@
 #!/bin/bash
-TOOLPATH=`dirname $0`
+REALPATH=`realpath $0`
+TOOLPATH=`dirname $REALPATH`
 
 echo Base path: $TOOLPATH
 
