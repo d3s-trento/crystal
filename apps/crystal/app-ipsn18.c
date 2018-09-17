@@ -5,6 +5,9 @@ static uint16_t app_seqn;
 static uint16_t app_log_seqn;
 static uint16_t app_n_packets;
 
+static app_t_payload t_payload;
+static app_a_payload a_payload;
+
 #define PACKETS_PER_EPOCH 1
 
 #if CRYSTAL_LOGGING
@@ -19,10 +22,11 @@ struct pkt_record {
 static void app_init() {
 }
 
-static inline void app_pre_S() {
+static inline uint8_t* app_pre_S() {
   app_have_packet = 0;
   log_send_seqn = 0;
   app_n_packets = 0;
+  return NULL;
 }
 
 static inline void app_new_packet() {
@@ -40,7 +44,7 @@ static inline void app_mark_acked() {
 #endif //CRYSTAL_LOGGING
 }
 
-static inline void app_post_S(int received) {
+static inline void app_post_S(int received, uint8_t* payload) {
   if (IS_SINK())
     return;
 #if CONCURRENT_TXS > 0
@@ -59,38 +63,43 @@ static inline void app_post_S(int received) {
 #endif // CONCURRENT_TXS
 }
 
-static inline int app_pre_T() {
+static inline uint8_t* app_pre_T() {
   log_send_acked = 0;
   if (app_have_packet) {
-    crystal_data->app.seqn = app_seqn;
-    crystal_data->app.src = node_id;
-    log_send_seqn = app_seqn;  // for logging
-    return 1;
+    t_payload.seqn = app_seqn;
+    t_payload.src  = node_id;
+    log_send_seqn  = app_seqn;  // for logging
+    return (uint8_t*)&t_payload;
   }
-  return 0;
+  return NULL;
 }
 
-static inline void app_between_TA(int received) {
+static inline uint8_t* app_between_TA(int received, uint8_t* payload) {
   if (received) {
-    log_recv_src = crystal_data->app.src;
-    log_recv_seqn = crystal_data->app.seqn;
-    if (IS_SINK()) {
+    t_payload = *(app_t_payload*)payload;
+
+    log_recv_src  = t_payload.src;
+    log_recv_seqn = t_payload.seqn;
+  }
+  if (received && IS_SINK()) {
       // fill in the ack payload
-      crystal_ack->app.seqn=log_recv_seqn;
-      crystal_ack->app.src=log_recv_src;
-    }
+      a_payload.seqn = log_recv_seqn;
+      a_payload.src  = log_recv_src;
   }
   else {
-    crystal_ack->app.seqn=NO_SEQN;
-    crystal_ack->app.src=NO_NODE;
+    a_payload.seqn = NO_SEQN;
+    a_payload.src  = NO_NODE;
   }
+  return (uint8_t*)&a_payload;
 }
 
-static inline void app_post_A(int received) {
+static inline void app_post_A(int received, uint8_t* payload) {
   // non-sink: if acked us, stop sending data
   log_send_acked = 0;
   if (app_have_packet && received) {
-    if ((crystal_ack->app.src == node_id) && (crystal_ack->app.seqn == app_seqn)) {
+    a_payload = *(app_a_payload*)payload;
+    
+    if ((a_payload.src == node_id) && (a_payload.seqn == app_seqn)) {
       log_send_acked = 1;
       app_mark_acked();
       if (app_n_packets < PACKETS_PER_EPOCH) {

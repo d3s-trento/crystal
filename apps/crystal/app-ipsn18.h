@@ -20,3 +20,8 @@ typedef struct {
 } 
 __attribute__((packed))
 app_a_payload;
+
+
+#define APP_SPLD_LEN sizeof(app_s_payload)
+#define APP_TPLD_LEN sizeof(app_t_payload)
+#define APP_APLD_LEN sizeof(app_a_payload)

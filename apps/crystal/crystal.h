@@ -86,23 +86,15 @@ typedef uint8_t crystal_addr_t; // IPSN'18
 //typedef uint8_t crystal_epoch_t; // NOT SUPPORTED !
 typedef uint16_t crystal_epoch_t; // IPSN'18
 
-
-/**
- * Length of data structure.
- */
-#define CRYSTAL_SYNC_LEN sizeof(crystal_sync_struct)
-#define CRYSTAL_DATA_LEN sizeof(crystal_data_struct)
-#define CRYSTAL_ACK_LEN sizeof(crystal_ack_struct)
-
 #define CRYSTAL_TYPE_SYNC 0x01
 #define CRYSTAL_TYPE_DATA 0x02
 #define CRYSTAL_TYPE_ACK  0x03
 
-#define CRYSTAL_ACK_AWAKE(ack) ((ack)->cmd == 0x11)
-#define CRYSTAL_ACK_SLEEP(ack) ((ack)->cmd == 0x22)
+#define CRYSTAL_ACK_AWAKE(ack) ((ack).cmd == 0x11)
+#define CRYSTAL_ACK_SLEEP(ack) ((ack).cmd == 0x22)
 
-#define CRYSTAL_SET_ACK_AWAKE(ack) ((ack)->cmd = 0x11)
-#define CRYSTAL_SET_ACK_SLEEP(ack) ((ack)->cmd = 0x22)
+#define CRYSTAL_SET_ACK_AWAKE(ack) ((ack).cmd = 0x11)
+#define CRYSTAL_SET_ACK_SLEEP(ack) ((ack).cmd = 0x22)
 
 #define CRYSTAL_ACK_CMD_CORRECT(ack) (CRYSTAL_ACK_AWAKE(ack) || CRYSTAL_ACK_SLEEP(ack))
 

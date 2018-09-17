@@ -6,24 +6,21 @@
 typedef struct {
   crystal_addr_t src;
   crystal_epoch_t epoch;
-  app_s_payload app;
 } 
 __attribute__((packed))
-crystal_sync_struct;
+crystal_sync_hdr_t;
 
 typedef struct {
-  app_t_payload app;
 } 
 __attribute__((packed))
-crystal_data_struct;
+crystal_data_hdr_t;
 
 typedef struct {
   crystal_epoch_t epoch;
   uint8_t n_ta;
   uint8_t cmd;
-  app_a_payload app;
 }
 __attribute__((packed))
-crystal_ack_struct;
+crystal_ack_hdr_t;
 
 #endif //PACKETS_H

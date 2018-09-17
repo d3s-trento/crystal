@@ -40,18 +40,18 @@
 
 #include "packets.h"
 
+#define CRYSTAL_MAX_DATA_LEN 20
 union {
-  crystal_sync_struct sync;
-  crystal_data_struct data;
-  crystal_ack_struct ack;
-} crystal_data_buf;
+  uint8_t raw[CRYSTAL_MAX_DATA_LEN];
+  crystal_sync_hdr_t sync_hdr;
+  crystal_data_hdr_t data_hdr;
+  crystal_ack_hdr_t ack_hdr;
+} buf;
 
-#define CRYSTAL_BUF_LEN (sizeof(crystal_data_buf))
-#define BZERO_BUF() bzero(&crystal_data_buf, CRYSTAL_BUF_LEN)
 
-#define crystal_sync ((crystal_sync_struct*)&crystal_data_buf) 
-#define crystal_data ((crystal_data_struct*)&crystal_data_buf) 
-#define crystal_ack ((crystal_ack_struct*)&crystal_data_buf) 
+#define BZERO_BUF() bzero(buf.raw, CRYSTAL_MAX_DATA_LEN)
+
+uint8_t* payload;
 
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy structure to be used in different phases
 
@@ -271,6 +271,12 @@ static char print_buf[PRINT_BUF_SIZE];
 #include "chseq.c"
 #include "app.c"
 
+
+#define CRYSTAL_S_LEN (sizeof(crystal_sync_hdr_t) + APP_SPLD_LEN)
+#define CRYSTAL_T_LEN (sizeof(crystal_data_hdr_t) + APP_TPLD_LEN)
+#define CRYSTAL_A_LEN (sizeof(crystal_ack_hdr_t)  + APP_APLD_LEN)
+
+
 #if CRYSTAL_LOGGING
 PROCESS(crystal_print_stats_process, "Crystal print stats");
 PROCESS(alive_print_process, "");
@@ -375,21 +381,26 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     // -- Phase S (root) ----------------------------------------------------------------- S (root) ---
 
     cc2420_oscon();
-
-    app_pre_S();
+    
+    payload = app_pre_S();
 
     // wait for the oscillator to stabilize
     rtimer_set(t, t_phase_start - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
     PT_YIELD(&pt);
 
     epoch ++;
-    crystal_sync->epoch = epoch;
-    crystal_sync->src = node_id;
-    t_phase_stop = t_phase_start + DUR_S;
+    buf.sync_hdr.epoch = epoch; 
+    buf.sync_hdr.src   = node_id;
 
+    if (payload) {
+      memcpy(buf.raw + sizeof(crystal_sync_hdr_t),
+          payload, APP_SPLD_LEN);
+    }
+
+    t_phase_stop = t_phase_start + DUR_S;
     channel = get_channel_epoch(epoch);
 
-    glossy_start(&glossy_S, (uint8_t *)crystal_sync, CRYSTAL_SYNC_LEN,
+    glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
         GLOSSY_INITIATOR, channel, GLOSSY_SYNC, N_TX_S,
         0, // don't stop on sync
         CRYSTAL_TYPE_SYNC, 
@@ -398,14 +409,13 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     // Yield the protothread. It will be resumed when Glossy terminates.
     PT_YIELD(&pt);
 
-    // Stop Glossy.
     glossy_stop();
     //leds_off(LEDS_BLUE);
     UPDATE_SLOT_STATS(S, 1);
     tx_count_S = get_tx_cnt();
     rx_count_S = get_rx_cnt();
 
-    app_post_S(0);
+    app_post_S(0, NULL);
     BZERO_BUF();
     // -- Phase S end (root) --------------------------------------------------------- S end (root) ---
 
@@ -420,7 +430,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
       app_pre_T();
 
-      glossy_start(&glossy_T, (uint8_t *)crystal_data, CRYSTAL_DATA_LEN,
+      glossy_start(&glossy_T, buf.raw, CRYSTAL_T_LEN,
           GLOSSY_RECEIVER, channel, GLOSSY_NO_SYNC, N_TX_T,
           0, // don't stop on sync
           CRYSTAL_TYPE_DATA, 
@@ -439,7 +449,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
         n_high_noise = 0;
         log_recv_type = get_app_header();
         log_recv_length = get_data_len();
-        correct_packet = (log_recv_length == CRYSTAL_DATA_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
+        correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
         log_recv_err = correct_packet?0:CRYSTAL_BAD_DATA;
       }
       else if (is_corrupted()) {
@@ -464,9 +474,9 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
         log_recv_err = CRYSTAL_SILENCE;
       }
 
-      app_between_TA(correct_packet);
+      payload = app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
       log_ta_rx();
-      //BZERO_BUF(); // cannot zero out as it has data for A
+      BZERO_BUF();
       // -- Phase T end (root) --------------------------------------------------------- T end (root) ---
       sleep_order = 
         epoch >= N_FULL_EPOCHS && (
@@ -477,16 +487,19 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
       // -- Phase A (root) ----------------------------------------------------------------- A (root) ---
 
       if (sleep_order)
-        CRYSTAL_SET_ACK_SLEEP(crystal_ack);
+        CRYSTAL_SET_ACK_SLEEP(buf.ack_hdr);
       else
-        CRYSTAL_SET_ACK_AWAKE(crystal_ack);
+        CRYSTAL_SET_ACK_AWAKE(buf.ack_hdr);
 
-      crystal_ack->n_ta = n_ta;
-      crystal_ack->epoch = epoch;
+      buf.ack_hdr.n_ta = n_ta;
+      buf.ack_hdr.epoch = epoch;
+      memcpy(buf.raw + sizeof(crystal_ack_hdr_t),
+          payload, APP_APLD_LEN);
+
       t_phase_start = ref_time + PHASE_A_OFFS(n_ta);
       t_phase_stop = t_phase_start + DUR_A;
 
-      glossy_start(&glossy_A, (uint8_t *)crystal_ack, CRYSTAL_ACK_LEN,
+      glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN,
           GLOSSY_INITIATOR, channel, CRYSTAL_SYNC_ACKS, N_TX_A,
           0, // don't stop on sync
           CRYSTAL_TYPE_ACK, 
@@ -497,7 +510,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
       glossy_stop();
 
       UPDATE_SLOT_STATS(A, 1);
-      app_post_A(0);
+      app_post_A(0, buf.raw + sizeof(crystal_ack_hdr_t));
       BZERO_BUF();
       // -- Phase A end (root) --------------------------------------------------------- A end (root) ---
 
@@ -506,7 +519,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     app_epoch_end();
 
     cc2420_oscoff(); // put radio to deep sleep
-    
+
 #if CRYSTAL_LOGGING
     // Now we have a long pause, good time to print
     rtimer_set(t, ref_time + PHASE_T_OFFS(CRYSTAL_MAX_TAS) + LOGGING_GAP, timer_handler, ptr);
@@ -554,7 +567,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
     t_phase_start = RTIMER_NOW() + (GLOSSY_PRE_TIME + 6); // + 6 is just to be sure
     t_phase_stop = t_phase_start + CRYSTAL_SCAN_SLOT_DURATION;
 
-    glossy_start(&glossy_S, (uint8_t *)crystal_sync, 0 /* size is not specified */,
+    glossy_start(&glossy_S, buf.raw, 0 /* size is not specified */,
         GLOSSY_RECEIVER, channel, GLOSSY_SYNC, 5 /* N */,
         //1, // stop immediately on sync
         0, // don't stop on sync
@@ -570,9 +583,9 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       // Sync packet received
       if (recvtype_S == CRYSTAL_TYPE_SYNC && 
-          recvlen_S  == CRYSTAL_SYNC_LEN  &&
-          crystal_sync->src  == CRYSTAL_SINK_ID) {
-        epoch = crystal_sync->epoch;
+          recvlen_S  == CRYSTAL_S_LEN  &&
+          buf.sync_hdr.src == CRYSTAL_SINK_ID) {
+        epoch = buf.sync_hdr.epoch;
         n_ta = 0;
         if (IS_SYNCED()) {
           corrected_ref_time = get_t_ref_l();
@@ -583,9 +596,9 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       }
       // Ack packet received
       else if (recvtype_S == CRYSTAL_TYPE_ACK && 
-               recvlen_S  == CRYSTAL_ACK_LEN) {
-        epoch = crystal_ack->epoch;
-        n_ta = crystal_ack->n_ta;
+               recvlen_S  == CRYSTAL_A_LEN) {
+        epoch = buf.ack_hdr.epoch;
+        n_ta = buf.ack_hdr.n_ta;
         if (IS_SYNCED()) {
           corrected_ref_time = get_t_ref_l() - PHASE_A_OFFS(n_ta);
           break; // exit the scanning
@@ -678,7 +691,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       epoch ++;
       channel = get_channel_epoch(epoch);
 
-      glossy_start(&glossy_S, (uint8_t *)crystal_sync, CRYSTAL_SYNC_LEN,
+      glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
           GLOSSY_RECEIVER, channel, GLOSSY_SYNC, N_TX_S,
           0, // don't stop on sync
           CRYSTAL_TYPE_SYNC, 
@@ -692,16 +705,16 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       recvlen_S = get_data_len();
       recvtype_S = get_app_header();
-      recvsrc_S = crystal_sync->src;
+      recvsrc_S = buf.sync_hdr.src;
       rx_count_S = get_rx_cnt();
       tx_count_S = get_tx_cnt();
 
       correct_packet = (recvtype_S == CRYSTAL_TYPE_SYNC 
           && recvsrc_S  == CRYSTAL_SINK_ID
-          && recvlen_S  == CRYSTAL_SYNC_LEN);
+          && recvlen_S  == CRYSTAL_S_LEN);
 
       if (rx_count_S > 0 && correct_packet) {
-        epoch = crystal_sync->epoch;
+        epoch = buf.sync_hdr.epoch;
         hopcount = get_relay_cnt();
       }
       if (IS_SYNCED() && rx_count_S > 0
@@ -728,7 +741,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       }
       //end_of_s_time = RTIMER_NOW()-ref_time; // just for debugging
 
-      app_post_S(correct_packet);
+      app_post_S(correct_packet, buf.raw + sizeof(crystal_sync_hdr_t));
       BZERO_BUF();
 
       starting_n_ta = 0;
@@ -746,7 +759,9 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       init_ta_log_vars();
       correct_packet = 0;
-      have_packet = app_pre_T();
+      payload = app_pre_T();
+      have_packet = payload != NULL;
+
       i_tx = (have_packet && 
           (sync_missed < N_SILENT_EPOCHS_TO_STOP_SENDING || n_noack_epochs < N_SILENT_EPOCHS_TO_STOP_SENDING));
       // TODO: instead of just suppressing tx when out of sync it's better to scan for ACKs or Sync beacons...
@@ -755,6 +770,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
         n_ta_tx ++;
         // no guards if I transmit
         guard = 0;
+        memcpy(buf.raw + sizeof(crystal_data_hdr_t), payload, APP_TPLD_LEN);
       }
       else {
         // guards for receiving
@@ -766,7 +782,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       //choice of the channel for each T-A slot
       channel = get_channel_epoch_ta(epoch, n_ta);
       
-      glossy_start(&glossy_T, (uint8_t *)crystal_data, CRYSTAL_DATA_LEN, 
+      glossy_start(&glossy_T, buf.raw, CRYSTAL_T_LEN, 
           i_tx, channel, GLOSSY_NO_SYNC, N_TX_T,
           0, // don't stop on sync
           CRYSTAL_TYPE_DATA, 
@@ -781,7 +797,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
         if (get_rx_cnt()) { // received data
           log_recv_type = get_app_header();
           log_recv_length = get_data_len();
-          correct_packet = (log_recv_length == CRYSTAL_DATA_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
+          correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
           log_recv_err = correct_packet?0:CRYSTAL_BAD_DATA;
           n_empty_ts = 0;
         }
@@ -796,7 +812,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
         cca_busy_cnt = get_cca_busy_cnt();
       }
 
-      app_between_TA(correct_packet);
+      app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
 
       BZERO_BUF();
 
@@ -809,7 +825,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       t_phase_start = corrected_ref_time - guard + PHASE_A_OFFS(n_ta) - CRYSTAL_REF_SHIFT;
       t_phase_stop = t_phase_start + DUR_A + guard;
 
-      glossy_start(&glossy_A, (uint8_t *)crystal_ack, CRYSTAL_ACK_LEN, 
+      glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN, 
           GLOSSY_RECEIVER, channel, CRYSTAL_SYNC_ACKS, N_TX_A,
           0, // don't stop on sync
           CRYSTAL_TYPE_ACK, 
@@ -821,32 +837,32 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       UPDATE_SLOT_STATS(A, 0);
 
       if (get_rx_cnt()) {
-        if (get_data_len() == CRYSTAL_ACK_LEN 
+        if (get_data_len() == CRYSTAL_A_LEN 
             && get_app_header() == CRYSTAL_TYPE_ACK 
-            && CRYSTAL_ACK_CMD_CORRECT(crystal_ack)) {
+            && CRYSTAL_ACK_CMD_CORRECT(buf.ack_hdr)) {
           correct_packet = 1;
           n_noacks = 0;
           n_bad_acks = 0;
           n_all_acks ++;
           // Updating the epoch in case we "skipped" some epochs but got an ACK
           // We can "skip" epochs if we are too late for the next TA and set the timer to the past
-          epoch = crystal_ack->epoch; 
+          epoch = buf.ack_hdr.epoch; 
 
           #if (CRYSTAL_SYNC_ACKS)
           // sometimes we get a packet with a corrupted n_ta
           // (e.g. 234) that's why checking the value
           // sometimes also the ref time is reported incorrectly, so have to check
-          if (IS_SYNCED() && crystal_ack->n_ta == n_ta
-              && correct_ack_skew(N_TA_TO_REF(get_t_ref_l(), crystal_ack->n_ta))
+          if (IS_SYNCED() && buf.ack_hdr.n_ta == n_ta
+              && correct_ack_skew(N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta))
              ) {
 
-            corrected_ref_time = N_TA_TO_REF(get_t_ref_l(), crystal_ack->n_ta);
+            corrected_ref_time = N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta);
             synced_with_ack ++;
             n_noack_epochs = 0; // it's important to reset it here to reenable TX right away (if it was suppressed)
           }
           #endif
 
-          if (CRYSTAL_ACK_SLEEP(crystal_ack)) {
+          if (CRYSTAL_ACK_SLEEP(buf.ack_hdr)) {
             sleep_order = 1;
           }
         }
@@ -859,7 +875,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
         // logging info about bad packets
         if (get_app_header() != CRYSTAL_TYPE_ACK)
           n_badtype_A ++;
-        if (get_data_len() != CRYSTAL_ACK_LEN)
+        if (get_data_len() != CRYSTAL_A_LEN)
           n_badlen_A ++;
 
         n_high_noise = 0;
@@ -884,7 +900,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
         }
       }
 
-      app_post_A(correct_packet);
+      app_post_A(correct_packet, buf.raw + sizeof(crystal_ack_hdr_t));
 
       if (i_tx)
         log_ta_tx();
