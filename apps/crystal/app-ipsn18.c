@@ -22,7 +22,7 @@ struct pkt_record {
 static void app_init() {
 }
 
-static inline uint8_t* app_pre_S() {
+uint8_t* app_pre_S() {
   app_have_packet = 0;
   log_send_seqn = 0;
   app_n_packets = 0;
@@ -44,8 +44,8 @@ static inline void app_mark_acked() {
 #endif //CRYSTAL_LOGGING
 }
 
-static inline void app_post_S(int received, uint8_t* payload) {
-  if (IS_SINK())
+void app_post_S(int received, uint8_t* payload) {
+  if (conf.is_sink)
     return;
 #if CONCURRENT_TXS > 0
   int i;
@@ -63,7 +63,7 @@ static inline void app_post_S(int received, uint8_t* payload) {
 #endif // CONCURRENT_TXS
 }
 
-static inline uint8_t* app_pre_T() {
+uint8_t* app_pre_T() {
   log_send_acked = 0;
   if (app_have_packet) {
     t_payload.seqn = app_seqn;
@@ -74,14 +74,14 @@ static inline uint8_t* app_pre_T() {
   return NULL;
 }
 
-static inline uint8_t* app_between_TA(int received, uint8_t* payload) {
+uint8_t* app_between_TA(int received, uint8_t* payload) {
   if (received) {
     t_payload = *(app_t_payload*)payload;
 
     log_recv_src  = t_payload.src;
     log_recv_seqn = t_payload.seqn;
   }
-  if (received && IS_SINK()) {
+  if (received && conf.is_sink) {
       // fill in the ack payload
       a_payload.seqn = log_recv_seqn;
       a_payload.src  = log_recv_src;
@@ -93,7 +93,7 @@ static inline uint8_t* app_between_TA(int received, uint8_t* payload) {
   return (uint8_t*)&a_payload;
 }
 
-static inline void app_post_A(int received, uint8_t* payload) {
+void app_post_A(int received, uint8_t* payload) {
   // non-sink: if acked us, stop sending data
   log_send_acked = 0;
   if (app_have_packet && received) {
@@ -113,12 +113,12 @@ static inline void app_post_A(int received, uint8_t* payload) {
 }
 
 
-static inline void app_epoch_end() {}
-static inline void app_ping() {}
+void app_epoch_end() {}
+void app_ping() {}
 
 #if CRYSTAL_LOGGING
 void app_print_logs() {
-  if (!IS_SINK()) {
+  if (!conf.is_sink) {
     int i;
     for (i=0; i<app_n_packets; i++) {
       printf("A %u:%u %u %u\n", epoch, 

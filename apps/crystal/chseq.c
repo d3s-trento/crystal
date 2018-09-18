@@ -6,34 +6,26 @@
 #define  CHMAP_comb10       6
 #define  CHMAP_comb07       7
 
-#ifndef CHHOP_MAPPING
-#error Undefined channel mapping
-#endif
+#define BSTRAP_nohop 0
+#define BSTRAP_hop1  1
+#define BSTRAP_hop2  2
+#define BSTRAP_hop3  3
 
-#define BOOT_nohop 0
-#define BOOT_hop1  1
-#define BOOT_hop2  2
-#define BOOT_hop3  3
-
-#ifndef BOOT_CHOPPING
-#error Undefined bootstrap channel hopping method
-#endif
-
-#if CHHOP_MAPPING == CHMAP_nohop
+#if CRYSTAL_CHHOP_MAPPING == CHMAP_nohop
 int channel_array[16] = {[0 ... 15] = RF_CHANNEL}; // no channel hopping
-#elif CHHOP_MAPPING == CHMAP_nomap 
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_nomap 
 int channel_array[16] = {11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26}; // no mapping
-#elif CHHOP_MAPPING == CHMAP_split 
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_split 
 int channel_array[16] = {20,20,20,18,24,20,20,20,18,26,26,26,26,26,26,26}; // Default channel-mapping ("split")
-#elif CHHOP_MAPPING == CHMAP_splitbetter
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_splitbetter
 int channel_array[16] = {20,20,20,24,24,20,20,20,24,26,26,26,26,26,26,26}; // Default with slightly better channels ("split", used in SenSys17)
-#elif CHHOP_MAPPING == CHMAP_comb13
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_comb13
 int channel_array[16] = {26,26,26,24,24,26,26,26,24,26,26,26,26,26,26,26}; // combined with 13 jammed
-#elif CHHOP_MAPPING == CHMAP_comb10
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_comb10
 int channel_array[16] = {26,26,26,24,24,24,24,24,24,26,26,26,26,26,26,26}; // combined with 10 jammed
-#elif CHHOP_MAPPING == CHMAP_comb07
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_comb07
 int channel_array[16] = {24,24,24,24,24,24,24,24,24,26,26,26,26,26,26,26}; // combined with 7 jammed
-#elif CHHOP_MAPPING == CHMAP_tmp32
+#elif CRYSTAL_CHHOP_MAPPING == CHMAP_tmp32
 int channel_array[] = {110, 115, 120, 125, 130, 135, 140, 145, 150, 155, 160, 165, 170, 175, 180, 185, 190, 195, 200, 205, 210, 215, 220, 225, 230, 235, 240, 245, 250, 255, 260};
 #else
 #error "Unsupported channel mapping name"
@@ -58,11 +50,11 @@ static inline int get_channel_epoch_ta(crystal_epoch_t epoch, uint8_t ta) {
 
 enum scan_rx {SCAN_RX_NOTHING, SCAN_RX_S, SCAN_RX_A};
 
-#if BOOT_CHOPPING == BOOT_nohop
+#if CRYSTAL_BSTRAP_CHHOPPING == BSTRAP_nohop
 static inline int get_channel_node_bootstrap(){
   return RF_CHANNEL;
 }
-#elif BOOT_CHOPPING == BOOT_hop3
+#elif CRYSTAL_BSTRAP_CHHOPPING == BSTRAP_hop3
 
 enum scan_state {SCAN_ST_CHASE_S, SCAN_ST_SEARCH} scan_state;
 
@@ -86,7 +78,7 @@ static inline int get_channel_node_bootstrap(enum scan_rx rx){
     scan_last_epoch = 1;
     scan_state = SCAN_ST_CHASE_S;
     // we might be late for the first S, try it but change to the next one in half-epoch time
-    scan_last_hop_ago = CRYSTAL_PERIOD / 2;
+    scan_last_hop_ago = conf.period / 2;
     return get_channel_epoch(scan_last_epoch);
 #else // SCAN_START_CHASING_S
     scan_last_ch_index = 0;
@@ -102,7 +94,7 @@ static inline int get_channel_node_bootstrap(enum scan_rx rx){
   if (rx == SCAN_RX_S) { // caught an S, try to catch the next one
     scan_state = SCAN_ST_CHASE_S;
     scan_epoch_misses = 0;
-    scan_last_hop_ago = CRYSTAL_PERIOD / 2;
+    scan_last_hop_ago = conf.period / 2;
     scan_last_epoch = epoch; // the current one but will change in half an epoch
     return get_channel_epoch(epoch);
   }
@@ -116,7 +108,7 @@ static inline int get_channel_node_bootstrap(enum scan_rx rx){
       return get_channel_epoch(scan_last_epoch);
     }
     else { // might be late for the next S, try it but change to +2 in half-epoch time
-      scan_last_hop_ago = CRYSTAL_PERIOD / 2;
+      scan_last_hop_ago = conf.period / 2;
       scan_last_epoch = epoch + 1; // the next one
       return get_channel_epoch(epoch);
     }
@@ -130,16 +122,16 @@ static inline int get_channel_node_bootstrap(enum scan_rx rx){
         return channel_array[scan_last_ch_index];
       }
       // is it time to change the epoch?
-      if (scan_last_hop_ago > CRYSTAL_PERIOD) {
+      if (scan_last_hop_ago > conf.period) {
         scan_epoch_misses ++;
-        scan_last_hop_ago = scan_last_hop_ago % (uint16_t)CRYSTAL_PERIOD;
+        scan_last_hop_ago = scan_last_hop_ago % (uint16_t)conf.period;
         scan_last_epoch ++;
       }
       return get_channel_epoch(scan_last_epoch);
     }
     else { // just searching
       // is it time to change the channel?
-      if (scan_last_hop_ago > CRYSTAL_PERIOD*1.3) {
+      if (scan_last_hop_ago > conf.period*1.3) {
         scan_last_hop_ago = 0;
         scan_last_ch_index = (scan_last_ch_index + 1) % 16;
       }
@@ -147,4 +139,6 @@ static inline int get_channel_node_bootstrap(enum scan_rx rx){
     }
   }
 }
-#endif // BOOT_CHOPPING
+#else
+#error "Unsupported bootstrap channel hopping setting"
+#endif // CRYSTAL_BSTRAP_CHHOPPING

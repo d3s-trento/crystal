@@ -3,31 +3,6 @@
 
 #include "glossy.h"
 
-#define CRYSTAL_PERIOD     (CRYSTAL_CONF_PERIOD*RTIMER_SECOND)
-
-//#define CRYSTAL_SINK_MAX_EMPTY_TS 2  // sink: max allowed number of empty Ts in a row
-//#define CRYSTAL_MAX_SILENT_TAS 2    // node: max allowed number of empty TA pairs in a row
-//#define CRYSTAL_MAX_SILENT_TAS CRYSTAL_SINK_MAX_EMPTY_TS
-//#define CRYSTAL_MAX_MISSING_ACKS 4    // node: max allowed number of missing acks in a row
-//#define CRYSTAL_SINK_MAX_NOISY_TS 4    // sink: max allowed number of noisy empty Ts in a row
-
-#define CRYSTAL_MAX_NOISY_AS CRYSTAL_SINK_MAX_NOISY_TS // node: max allowed number of noisy empty As
-
-//#define CRYSTAL_PAYLOAD_LENGTH 0      // the length of the application data payload
-
-//#define CCA_THRESHOLD -32
-//#define CCA_COUNTER_THRESHOLD 80
-
-
-//#define CRYSTAL_SYNC_ACKS 1
-
-/**
- * Duration of each Glossy phase.
- */
-#define DUR_S ((uint32_t)RTIMER_SECOND*DUR_S_MS/1000)
-#define DUR_T ((uint32_t)RTIMER_SECOND*DUR_T_MS/1000)
-#define DUR_A ((uint32_t)RTIMER_SECOND*DUR_A_MS/1000)
-
 
 //#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms
 #define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms
@@ -99,6 +74,38 @@ typedef uint16_t crystal_epoch_t; // IPSN'18
 #define CRYSTAL_ACK_CMD_CORRECT(ack) (CRYSTAL_ACK_AWAKE(ack) || CRYSTAL_ACK_SLEEP(ack))
 
 
+typedef struct {
+  uint32_t period;
+  uint8_t is_sink;
+  uint8_t ntx_S;
+  uint16_t w_S;
+  uint8_t plds_S;
+  uint8_t ntx_T;
+  uint16_t w_T;
+  uint8_t plds_T;
+  uint8_t ntx_A;
+  uint16_t w_A;
+  uint8_t plds_A;
+  uint8_t r;
+  uint8_t y;
+  uint8_t z;
+  uint8_t x;
+  uint8_t xa;
+  uint16_t ch_whitelist;
+  uint8_t enc_enable;
+  uint8_t scan_duration;
+} crystal_config_t;
 
+
+
+/* Crystal application interface (callbacks) */
+uint8_t* app_pre_S();
+void app_post_S(int received, uint8_t* payload);
+uint8_t* app_pre_T();
+uint8_t* app_between_TA(int received, uint8_t* payload);
+void app_post_A(int received, uint8_t* payload);
+void app_epoch_end();
+void app_ping();
+void app_print_logs();
 
 #endif /* CRYSTAL_H_ */
