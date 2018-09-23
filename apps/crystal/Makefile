@@ -1,7 +1,7 @@
-CONTIKI_PROJECT = crystal
+CONTIKI_PROJECT = crystal-test
 all: $(CONTIKI_PROJECT)
 
-#CONTIKI_SOURCEFILES +=
+CONTIKI_SOURCEFILES += crystal.c
 
 
 CONTIKI = ../..

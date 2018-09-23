@@ -35,11 +35,9 @@
 
 #include "crystal.h"
 #include "crystal-conf.h"
+#include "crystal-private.h"
 #include "cc2420.h"
 #include "node-id.h"
-#include "ds2411.h"
-
-#include "packets.h"
 
 #define CRYSTAL_MAX_DATA_LEN 20
 union {
@@ -48,6 +46,7 @@ union {
   crystal_data_hdr_t data_hdr;
   crystal_ack_hdr_t ack_hdr;
 } buf;
+#define BZERO_BUF() bzero(buf.raw, CRYSTAL_MAX_DATA_LEN)
 
 
 crystal_config_t conf = {
@@ -73,10 +72,9 @@ crystal_config_t conf = {
   .scan_duration = 0xFF,
 };
 
+crystal_info_t crystal_info;          // public read-only status information about Crystal
 
-#define BZERO_BUF() bzero(buf.raw, CRYSTAL_MAX_DATA_LEN)
-
-uint8_t* payload;
+uint8_t* payload;                     // application payload pointer for the current slot
 
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy structure to be used in different phases
 
@@ -148,9 +146,6 @@ static uint16_t log_send_acked;
 #define PHASE_A_OFFS(n) (PHASE_T_OFFS(n) + (conf.w_T + CRYSTAL_INTER_PHASE_GAP))
 
 
-// Time for the radio crystal oscillator to stabilize
-#define OSC_STAB_TIME (RTIMER_SECOND/500) // 2 ms
-
 #if CRYSTAL_LOGGING
 #define LOGGING_GAP 100 // give 3 ms gap after the last TA before printing 
 // this should be set in accordance with the slot durations so that
@@ -178,20 +173,20 @@ static uint16_t log_send_acked;
 
 #define N_TA_TO_REF(tref, n) (tref-PHASE_A_OFFS(n))
 
-#define N_MISSED_FOR_INIT_GUARD 3
-
-#define N_SILENT_EPOCHS_TO_RESET 100
-#define N_SILENT_EPOCHS_TO_STOP_SENDING 3
 
 #define SYSTEM_RESET() do {WDTCTL = 0;} while(0)
 
-#define APP_PING_INTERVAL (RTIMER_SECOND / 31) // 32 ms
 
 // info about a data packet received during T phase
+//
+// TODO: convert it to a common TA info
+// TODO: move the app-level logging to the app itself
+// TODO: add T_on here, remove the related statistics from the code
+// TODO: add tx_count
 struct recv_info {
   uint8_t n_ta;
-  uint8_t src;
-  uint16_t seqn;
+  uint8_t src; // app
+  uint16_t seqn; // app
   uint8_t type;
   uint8_t rx_count;
   uint8_t length;
@@ -201,33 +196,33 @@ struct recv_info {
 // info about a data packet sent during T phase
 struct send_info {
   uint8_t n_ta;
-  uint16_t seqn;
+  uint16_t seqn; // app
   uint8_t rx_count;
-  uint8_t acked;
+  uint8_t acked; // app
 };
 
 
-#if CRYSTAL_LOGGING
+#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
 #define MAX_LOG_TAS 100
 static struct recv_info recv_t[MAX_LOG_TAS];
 static int n_rec_rx; // number of receive records in the array
 
 static struct send_info send_t[MAX_LOG_TAS];
 static int n_rec_tx; // number of send records in the array
-#endif //CRYSTAL_LOGGING
+#endif //CRYSTAL_LOGLEVEL
 
 static inline void init_ta_log_vars() {
-#if CRYSTAL_LOGGING
+#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
   log_recv_type = 0; log_recv_length = 0; log_recv_err = 0;
 
   // the following are set by the application code
   log_recv_seqn = 0; log_recv_src = 0;
   log_send_seqn = 0; log_send_acked = 0;
-#endif //CRYSTAL_LOGGING
+#endif //CRYSTAL_LOGLEVEL
 }
 
 static inline void log_ta_rx() {
-#if CRYSTAL_LOGGING
+#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
   if (n_rec_rx < MAX_LOG_TAS) {
     recv_t[n_rec_rx].n_ta = n_ta;
     recv_t[n_rec_rx].src = log_recv_src;
@@ -238,11 +233,11 @@ static inline void log_ta_rx() {
     recv_t[n_rec_rx].err_code = log_recv_err;
     n_rec_rx ++;
   }
-#endif //CRYSTAL_LOGGING
+#endif //CRYSTAL_LOGLEVEL
 }
 
 static inline void log_ta_tx() {
-#if CRYSTAL_LOGGING
+#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
   if (n_rec_tx < MAX_LOG_TAS) {
     send_t[n_rec_tx].n_ta = n_ta;
     send_t[n_rec_tx].seqn = log_send_seqn;
@@ -250,9 +245,8 @@ static inline void log_ta_tx() {
     send_t[n_rec_tx].acked = log_send_acked;
     n_rec_tx ++;
   }
-#endif //CRYSTAL_LOGGING
+#endif //CRYSTAL_LOGLEVEL
 }
-
 
 #define IS_SYNCED()          (is_t_ref_l_updated())
 
@@ -272,10 +266,6 @@ static inline void log_ta_tx() {
   } \
 } while(0)
 
-#define CRYSTAL_BAD_DATA   1
-#define CRYSTAL_BAD_CRC    2
-#define CRYSTAL_HIGH_NOISE 3
-#define CRYSTAL_SILENCE    4
 
 //#if PRINT_GRAZ && CRYSTAL_LOGGING
 #if 0
@@ -293,8 +283,6 @@ static char print_buf[PRINT_BUF_SIZE];
 
 
 #include "chseq.c"
-#include "app.c"
-
 
 #define CRYSTAL_S_LEN (sizeof(crystal_sync_hdr_t) + conf.plds_S)
 #define CRYSTAL_T_LEN (sizeof(crystal_data_hdr_t) + conf.plds_T)
@@ -387,6 +375,8 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     PT_YIELD(&pt);
 
     epoch ++;
+    crystal_info.epoch = epoch;
+
     buf.sync_hdr.epoch = epoch; 
     buf.sync_hdr.src   = node_id;
 
@@ -571,8 +561,8 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       // Sync packet received
       if (recvtype_S == CRYSTAL_TYPE_SYNC && 
-          recvlen_S  == CRYSTAL_S_LEN  &&
-          buf.sync_hdr.src == CRYSTAL_SINK_ID) {
+          recvlen_S  == CRYSTAL_S_LEN  //&&
+          /*buf.sync_hdr.src == conf.sink_id*/) {
         epoch = buf.sync_hdr.epoch;
         n_ta = 0;
         if (IS_SYNCED()) {
@@ -586,7 +576,10 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       else if (recvtype_S == CRYSTAL_TYPE_ACK && 
                recvlen_S  == CRYSTAL_A_LEN) {
         epoch = buf.ack_hdr.epoch;
+        crystal_info.epoch = epoch;
+
         n_ta = buf.ack_hdr.n_ta;
+        
         if (IS_SYNCED()) {
           corrected_ref_time = get_t_ref_l() - PHASE_A_OFFS(n_ta);
           break; // exit the scanning
@@ -624,6 +617,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
     // We are that late so the next epoch started
     // (for sure this will not work with period of 2s)
     epoch ++;
+    crystal_info.epoch = epoch;
     corrected_ref_time += conf.period;
     if (offs > conf.period) // safe to subtract 
       offs -= conf.period;
@@ -677,6 +671,8 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       // -- Phase S (non-root) --------------------------------------------------------- S (non-root) ---
 
       epoch ++;
+      crystal_info.epoch = epoch;
+
       channel = get_channel_epoch(epoch);
 
       glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
@@ -698,7 +694,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       tx_count_S = get_tx_cnt();
 
       correct_packet = (recvtype_S == CRYSTAL_TYPE_SYNC 
-          && recvsrc_S  == CRYSTAL_SINK_ID
+          /*&& recvsrc_S  == conf.sink_id */
           && recvlen_S  == CRYSTAL_S_LEN);
 
       if (rx_count_S > 0 && correct_packet) {
@@ -959,19 +955,10 @@ static void tune_AGC_radio() {
   FASTSPI_SETREG(CC2420_AGCTST1, (reg_agctst + (1 << 8) + (1 << 13)));
 }
 
-
-PROCESS(crystal_test, "Crystal test");
-AUTOSTART_PROCESSES(&crystal_test);
-PROCESS_THREAD(crystal_test, ev, data)
+bool crystal_start(crystal_config_t* conf_)
 {
-  PROCESS_BEGIN();
-
-  conf.is_sink = node_id == CRYSTAL_SINK_ID;
-  conf.plds_S = sizeof(app_s_payload);
-  conf.plds_T = sizeof(app_t_payload);
-  conf.plds_A = sizeof(app_a_payload);
-
-  app_init();
+  // TODO: check the config
+  conf = *conf_;
 
   if (conf.is_sink)
     timer_handler = sink_timer_handler;
@@ -993,10 +980,8 @@ PROCESS_THREAD(crystal_test, ev, data)
   process_start(&glossy_process, NULL);
   // Start Crystal
   rtimer_set(&rt, RTIMER_NOW() + 10, timer_handler, NULL);
-
-  PROCESS_END();
+  return true;
 }
-
 
 #if CRYSTAL_LOGGING
 PROCESS_THREAD(crystal_print_stats_process, ev, data)
@@ -1010,6 +995,7 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
 
   while(1) {
     PROCESS_YIELD_UNTIL(ev == PROCESS_EVENT_POLL);
+#if CRYSTAL_LOGLEVEL
     scan_channel = channel_array[epoch % get_num_channels()];
     cc2420_set_channel(scan_channel);
     cc2420_oscon();
@@ -1022,6 +1008,7 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
       printf("P %u:%u %u %u:%u %u %u %d:%ld\n", epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, ack_skew_err, end_of_s_time);
     }
 
+#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
     printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_rx, noise, scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
     for (i=0; i<n_rec_rx; i++) {
       printf("T %u:%u %u %u %u %u %u %u %u\n", epoch, i,
@@ -1040,14 +1027,17 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
         send_t[i].rx_count,
         send_t[i].acked);
     }
-
+    n_rec_rx = 0;
+    n_rec_tx = 0;
+#endif
+#endif
     app_print_logs();
     /*printf("D %u:%u %lu %u:%u %lu %u\n", epoch,
       glossy_S.T_slot_h, glossy_S.T_slot_h_sum, glossy_S.win_cnt,
       glossy_A.T_slot_h, glossy_A.T_slot_h_sum, glossy_A.win_cnt
       );*/
 
-#if ENERGEST_CONF_ON
+#if ENERGEST_CONF_ON && CRYSTAL_LOGLEVEL
     if (!first_time) {
       // Compute average radio-on time.
       avg_radio_on = (energest_type_time(ENERGEST_TYPE_LISTEN) + energest_type_time(ENERGEST_TYPE_TRANSMIT))
@@ -1063,19 +1053,14 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
     energest_init();
     first_time = 0;
 #endif /* ENERGEST_CONF_ON */
-
-    n_rec_rx = 0;
-    n_rec_tx = 0;
   }
-
-  PROCESS_END();
-}
-
-PROCESS_THREAD(alive_print_process, ev, data) {
-  PROCESS_BEGIN();
-  PROCESS_YIELD_UNTIL(ev == PROCESS_EVENT_POLL);
-  printf("I am alive! EUI-64: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n", ds2411_id[0],ds2411_id[1],ds2411_id[2],ds2411_id[3],ds2411_id[4],ds2411_id[5],ds2411_id[6],ds2411_id[7]);
   PROCESS_END();
 }
 
 #endif //CRYSTAL_LOGGING
+
+crystal_config_t crystal_get_config() {
+  return conf;
+}
+
+
