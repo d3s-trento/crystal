@@ -4,7 +4,7 @@
 #include "ds2411.h"
 #include "etimer.h"
 
-static const uint8_t sndtbl[] = {SENDERS_TABLE};
+#include "sndtbl.c"
 
 static uint16_t app_have_packet;
 static uint16_t app_seqn;
@@ -163,7 +163,13 @@ void app_print_logs() {
 }
 
 
+#ifndef START_DELAY_SINK
+#define START_DELAY_SINK 0
+#endif
 
+#ifndef START_DELAY_NONSINK
+#define START_DELAY_NONSINK 0
+#endif
 
 PROCESS(crystal_test, "Crystal test");
 AUTOSTART_PROCESSES(&crystal_test);
@@ -172,13 +178,18 @@ PROCESS_THREAD(crystal_test, ev, data) {
 
   static struct etimer et;
 
-  etimer_set(&et, CLOCK_SECOND);
+  is_sink = node_id == SINK_ID;
+
+  if (is_sink)
+    etimer_set(&et, START_DELAY_SINK*CLOCK_SECOND);
+  else
+    etimer_set(&et, START_DELAY_NONSINK*CLOCK_SECOND);
+
   PROCESS_YIELD_UNTIL(etimer_expired(&et));
 
 
   printf("I am alive! EUI-64: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n", ds2411_id[0],ds2411_id[1],ds2411_id[2],ds2411_id[3],ds2411_id[4],ds2411_id[5],ds2411_id[6],ds2411_id[7]);
 
-  is_sink = node_id == SINK_ID;
 
   crystal_config_t conf = crystal_get_config();
   conf.is_sink = is_sink;

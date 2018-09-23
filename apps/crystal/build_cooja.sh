@@ -16,11 +16,12 @@ CFLAGS+=" -DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_EPOCH_STATS"
 
 CFLAGS+=" -DSTART_EPOCH=1"
 
-CFLAGS+=" -DSENDERS_TABLE=2,3,4,5,6"
-
 export CFLAGS
+
+echo "static uint8_t sndtbl[] = {2,3,4,5,6};" > sndtbl.c
 
 make clean
 rm crystal-test.sky
 
 make 
+rm sndtbl.c

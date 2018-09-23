@@ -53,7 +53,7 @@ def generate_table_array(nodes, num_epochs, concurrent_txs):
     return "static const uint8_t sndtbl[] = {%s};"%",".join([str(x) for x in tbl])
 
 
-binary_name = "crystal.sky"
+binary_name = "crystal-test.sky"
 
 def prepare_binary(simdir, nodes, num_epochs, concurrent_txs, new_env):
     env = os.environ.copy()
@@ -85,7 +85,6 @@ def prepare_binary(simdir, nodes, num_epochs, concurrent_txs, new_env):
     copy(abs_bname, simdir)
     copy(abs_ihex_name, simdir)
     copy(abs_env_name, simdir)
-    copy(abs_tbl_name, simdir)
 
 
 
@@ -93,34 +92,33 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
     cflags = [
     "-DTX_POWER=%d"%power,
     "-DRF_CHANNEL=%d"%channel,
-    "-DCRYSTAL_SINK_ID=%d"%sink,
+    "-DSINK_ID=%d"%sink,
     "-DSTART_EPOCH=%d"%start_epoch,
     "-DCONCURRENT_TXS=%d"%num_senders,
     "-DNUM_ACTIVE_EPOCHS=%d"%active_epochs,
-    "-DCRYSTAL_CONF_PERIOD=%f"%period,
-    "-DN_TX_S=%d"%n_tx_s,
-    "-DN_TX_T=%d"%n_tx_t,
-    "-DN_TX_A=%d"%n_tx_a,
-    "-DDUR_S_MS=%d"%dur_s,
-    "-DDUR_T_MS=%d"%dur_t,
-    "-DDUR_A_MS=%d"%dur_a,
-    "-DCRYSTAL_SYNC_ACKS=%d"%sync_ack,
-    "-DCRYSTAL_LONGSKIP=%d"%longskip,
-    "-DCRYSTAL_PAYLOAD_LENGTH=%d"%payload,
-    "-DCRYSTAL_SINK_MAX_EMPTY_TS=%d"%n_empty.r,
-    "-DCRYSTAL_MAX_SILENT_TAS=%d"%n_empty.y,
-    "-DCRYSTAL_MAX_MISSING_ACKS=%d"%n_empty.z,
-    "-DCRYSTAL_SINK_MAX_NOISY_TS=%d"%n_empty.x,
-    "-DCRYSTAL_USE_DYNAMIC_NEMPTY=%d"%dyn_nempty,
-    "-DCCA_THRESHOLD=%d"%cca.dbm,
-    "-DCCA_COUNTER_THRESHOLD=%d"%cca.counter,
-    "-DCHHOP_MAPPING=CHMAP_%s"%chmap,
-    "-DBOOT_CHOPPING=BOOT_%s"%boot_chop,
-    "-DN_FULL_EPOCHS=%d"%full_epochs,
+    "-DPAYLOAD_LENGTH=%d"%payload,
+    "-DCRYSTAL_CONF_PERIOD_MS=%f"%(period*1000),
+    "-DCRYSTAL_CONF_N_TX_S=%d"%n_tx_s,
+    "-DCRYSTAL_CONF_N_TX_T=%d"%n_tx_t,
+    "-DCRYSTAL_CONF_N_TX_A=%d"%n_tx_a,
+    "-DCRYSTAL_CONF_DUR_S_MS=%d"%dur_s,
+    "-DCRYSTAL_CONF_DUR_T_MS=%d"%dur_t,
+    "-DCRYSTAL_CONF_DUR_A_MS=%d"%dur_a,
+    "-DCRYSTAL_CONF_SYNC_ACKS=%d"%sync_ack,
+    "-DCRYSTAL_CONF_SINK_MAX_EMPTY_TS=%d"%n_empty.r,
+    "-DCRYSTAL_CONF_MAX_SILENT_TAS=%d"%n_empty.y,
+    "-DCRYSTAL_CONF_MAX_MISSING_ACKS=%d"%n_empty.z,
+    "-DCRYSTAL_CONF_SINK_MAX_NOISY_TS=%d"%n_empty.x,
+    "-DCRYSTAL_CONF_DYNAMIC_NEMPTY=%d"%dyn_nempty,
+    "-DCRYSTAL_CONF_CCA_THRESHOLD=%d"%cca.dbm,
+    "-DCRYSTAL_CONF_CCA_COUNTER_THRESHOLD=%d"%cca.counter,
+    "-DCRYSTAL_CONF_CHHOP_MAPPING=CHMAP_%s"%chmap,
+    "-DCRYSTAL_CONF_BSTRAP_CHHOPPING=BOOT_%s"%boot_chop,
+    "-DCRYSTAL_CONF_N_FULL_EPOCHS=%d"%full_epochs,
     ]
 
     if logging:
-        cflags += ["-DCRYSTAL_LOGGING=1"]
+        cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_LOGLEVEL=CRYSTAL_LOGS_ALL"]
     else:
         cflags += ["-DDISABLE_UART=1"]
 
@@ -128,8 +126,6 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
         cflags += ["-DTINYOS_SERIAL_FRAMES=1"]
     if testbed in ("indriya", "fbk", "flock", "twist"):
         cflags += ["-DTINYOS_NODE_ID=1"]
-    if testbed == "indriya":
-        cflags += ["-DSHORT_LOGS=1"]
     if testbed == "cooja":
         cflags += ["-DCOOJA=1"]
     if testbed in ("indriya", "fbk"):
