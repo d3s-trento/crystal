@@ -25,4 +25,4 @@ msp430-objcopy -O ihex crystal-test.sky crystal-test.sky.ihex | tee -a $ENV
 
 echo "-- sndtbl.c --------" >> $ENV
 cat sndtbl.c >> $ENV
-rm sndtbl.c
+rm -f sndtbl.c symbols.h symbols.c

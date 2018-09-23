@@ -282,7 +282,7 @@ static char print_buf[PRINT_BUF_SIZE];
 #endif
 
 
-#include "chseq.c"
+#include "crystal-chseq.c"
 
 #define CRYSTAL_S_LEN (sizeof(crystal_sync_hdr_t) + conf.plds_S)
 #define CRYSTAL_T_LEN (sizeof(crystal_data_hdr_t) + conf.plds_T)

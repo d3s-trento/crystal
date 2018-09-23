@@ -2,7 +2,8 @@
 
 
 ARCH=glossy.c msp430.c leds.c watchdog.c spi.c \
-     xmem.c cc2420.c node-id.c uart1.c ds2411.c
+     xmem.c cc2420.c node-id.c uart1.c ds2411.c \
+     crystal.c
 
 CONTIKI_TARGET_DIRS = . dev apps net
 ifndef CONTIKI_TARGET_MAIN

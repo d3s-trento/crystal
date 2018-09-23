@@ -24,4 +24,4 @@ make clean
 rm crystal-test.sky
 
 make 
-rm sndtbl.c
+rm -f sndtbl.c symbols.h symbols.c
