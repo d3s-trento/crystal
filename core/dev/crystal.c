@@ -39,7 +39,6 @@
 #include "cc2420.h"
 #include "node-id.h"
 
-#define CRYSTAL_MAX_DATA_LEN 20
 union {
   uint8_t raw[CRYSTAL_MAX_DATA_LEN];
   crystal_sync_hdr_t sync_hdr;
@@ -957,7 +956,14 @@ static void tune_AGC_radio() {
 
 bool crystal_start(crystal_config_t* conf_)
 {
-  // TODO: check the config
+  // check the config
+  if (sizeof(crystal_sync_hdr_t) + conf.plds_S > CRYSTAL_MAX_DATA_LEN ||
+      sizeof(crystal_data_hdr_t) + conf.plds_T > CRYSTAL_MAX_DATA_LEN ||
+      sizeof(crystal_ack_hdr_t)  + conf.plds_A > CRYSTAL_MAX_DATA_LEN)
+    return false;
+
+  // TODO: check the rest of the config
+  
   conf = *conf_;
 
   if (conf.is_sink)
