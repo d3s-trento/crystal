@@ -309,21 +309,21 @@ static inline int correct_hops() {
 #define CRYSTAL_ACK_SKEW_ERROR_DETECTION 1 
 static inline int correct_ack_skew(rtimer_clock_t new_ref) {
 #if (CRYSTAL_ACK_SKEW_ERROR_DETECTION)
-  static int new_Skew;
+  static int new_skew;
 #if (MAX_CORRECT_HOPS>0)
   if (get_relay_cnt()>MAX_CORRECT_HOPS)
     return 0;
 #endif
-  new_Skew = new_ref - corrected_ref_time;
-  //if (new_Skew < 20 && new_Skew > -20)  // IPSN'18
-  if (new_Skew < 60 && new_Skew > -60)
+  new_skew = new_ref - corrected_ref_time;
+  //if (new_skew < 20 && new_skew > -20)  // IPSN'18
+  if (new_skew < 60 && new_skew > -60)
     return 1;  // the skew looks correct
   else if (sync_missed && !synced_with_ack) {
     return 1;  // the skew is big but we did not synchronise during the current epoch, so probably it is fine
   }
   else {
     // signal error (0) only if not synchronised with S or another A in the current epoch.
-    ack_skew_err = new_Skew;
+    ack_skew_err = new_skew;
     return 0;
   }
 #else
@@ -366,7 +366,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     // -- Phase S (root) ----------------------------------------------------------------- S (root) ---
 
     cc2420_oscon();
-    
+
     payload = app_pre_S();
 
     // wait for the oscillator to stabilize
@@ -376,7 +376,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     epoch ++;
     crystal_info.epoch = epoch;
 
-    buf.sync_hdr.epoch = epoch; 
+    buf.sync_hdr.epoch = epoch;
     buf.sync_hdr.src   = node_id;
 
     if (payload) {
@@ -563,6 +563,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
           recvlen_S  == CRYSTAL_S_LEN  //&&
           /*buf.sync_hdr.src == conf.sink_id*/) {
         epoch = buf.sync_hdr.epoch;
+        crystal_info.epoch = epoch;
         n_ta = 0;
         if (IS_SYNCED()) {
           corrected_ref_time = get_t_ref_l();
@@ -830,6 +831,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
           // Updating the epoch in case we "skipped" some epochs but got an ACK
           // We can "skip" epochs if we are too late for the next TA and set the timer to the past
           epoch = buf.ack_hdr.epoch; 
+          crystal_info.epoch = epoch;
 
           #if (CRYSTAL_SYNC_ACKS)
           // sometimes we get a packet with a corrupted n_ta

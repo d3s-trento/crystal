@@ -27,9 +27,7 @@ args = ap.parse_args()
 
 basepath = args.basepath
 print "Base path:", basepath
-#apppath = os.path.join(basepath, "apps", "glossy-test")
-#apppath = os.path.join(basepath, "apps", "ta")
-apppath = os.path.join(basepath, "apps", "crystal")
+apppath = os.path.join(basepath, "apps", "crystal-test")
 sys.path += [".", os.path.join(basepath,"test_tools")]
 params = args.config
 
@@ -118,7 +116,7 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
     ]
 
     if logging:
-        cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_LOGLEVEL=CRYSTAL_LOGS_ALL"]
+        cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_ALL"]
     else:
         cflags += ["-DDISABLE_UART=1"]
 

@@ -202,10 +202,3 @@ PROCESS_THREAD(crystal_test, ev, data) {
   PROCESS_END();
 }
 
-
-
-PROCESS_THREAD(alive_print_process, ev, data) {
-  PROCESS_BEGIN();
-  PROCESS_YIELD_UNTIL(ev == PROCESS_EVENT_POLL);
-  PROCESS_END();
-}
