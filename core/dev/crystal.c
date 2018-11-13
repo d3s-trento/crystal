@@ -794,6 +794,9 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
           n_empty_ts ++;
         }
         cca_busy_cnt = get_cca_busy_cnt();
+
+        if (get_rx_cnt())
+          log_ta_rx();
       }
 
       app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
@@ -889,8 +892,6 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       if (i_tx)
         log_ta_tx();
-      else
-        log_ta_rx();
 
       BZERO_BUF();
       // -- Phase A end (non-root) ------------------------------------------------- A end (non-root) ---
