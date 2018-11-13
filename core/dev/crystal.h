@@ -53,4 +53,15 @@ typedef struct {
 
 extern crystal_info_t crystal_info;
 
+#define PRINT_CRYSTAL_CONFIG(conf) do {\
+ printf("Crystal config. Node ID %x\n", node_id);\
+ printf("Period: %lu\n", (conf).period);\
+ printf("Sink: %u\n", (conf).is_sink);\
+ printf("S: %u %u %u\n", (conf).ntx_S, (conf).w_S, (conf).plds_S);\
+ printf("T: %u %u %u\n", (conf).ntx_T, (conf).w_T, (conf).plds_T);\
+ printf("A: %u %u %u\n", (conf).ntx_A, (conf).w_A, (conf).plds_A);\
+ printf("Term: %u %u %u %u %u\n", (conf).r, (conf).y, (conf).z, (conf).x, (conf).xa);\
+ printf("Ch: %x, Enc: %u, Scan: %u\n", (conf).ch_whitelist, (conf).enc_enable, (conf).scan_duration);\
+} while (0)
+
 #endif /* CRYSTAL_H_ */
