@@ -202,7 +202,7 @@ struct send_info {
 
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-#define MAX_LOG_TAS 100
+#define MAX_LOG_TAS 20 // XXX fix this! If set larger, there's no time to print everything at the end of the epoch
 static struct recv_info recv_t[MAX_LOG_TAS];
 static int n_rec_rx; // number of receive records in the array
 
@@ -967,6 +967,7 @@ bool crystal_start(crystal_config_t* conf_)
   // TODO: check the rest of the config
   
   conf = *conf_;
+  //PRINT_CRYSTAL_CONFIG(conf);
 
   if (conf.is_sink)
     timer_handler = sink_timer_handler;
