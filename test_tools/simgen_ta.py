@@ -86,7 +86,7 @@ def prepare_binary(simdir, nodes, num_epochs, concurrent_txs, new_env):
 
 
 
-def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
+def mk_env(power, channel, sink, num_senders, n_empty, cca):
     cflags = [
     "-DTX_POWER=%d"%power,
     "-DRF_CHANNEL=%d"%channel,
@@ -95,7 +95,7 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
     "-DCONCURRENT_TXS=%d"%num_senders,
     "-DNUM_ACTIVE_EPOCHS=%d"%active_epochs,
     "-DPAYLOAD_LENGTH=%d"%payload,
-    "-DCRYSTAL_CONF_PERIOD_MS=%f"%(period*1000),
+    "-DCRYSTAL_CONF_PERIOD_MS=%d"%(int(period*1000)),
     "-DCRYSTAL_CONF_N_TX_S=%d"%n_tx_s,
     "-DCRYSTAL_CONF_N_TX_T=%d"%n_tx_t,
     "-DCRYSTAL_CONF_N_TX_A=%d"%n_tx_a,
@@ -111,12 +111,13 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
     "-DCRYSTAL_CONF_CCA_THRESHOLD=%d"%cca.dbm,
     "-DCRYSTAL_CONF_CCA_COUNTER_THRESHOLD=%d"%cca.counter,
     "-DCRYSTAL_CONF_CHHOP_MAPPING=CHMAP_%s"%chmap,
-    "-DCRYSTAL_CONF_BSTRAP_CHHOPPING=BOOT_%s"%boot_chop,
+    "-DCRYSTAL_CONF_BSTRAP_CHHOPPING=BSTRAP_%s"%boot_chop,
     "-DCRYSTAL_CONF_N_FULL_EPOCHS=%d"%full_epochs,
     ]
 
     if logging:
         cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_ALL"]
+        #cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_EPOCH_STATS"]
     else:
         cflags += ["-DDISABLE_UART=1"]
 
@@ -127,9 +128,9 @@ def mk_env(power, channel, sink, num_senders, longskip, n_empty, cca):
     if testbed == "cooja":
         cflags += ["-DCOOJA=1"]
     if testbed in ("indriya", "fbk"):
-        cflags += ["-DCRYSTAL_START_DELAY_SINK=40", "-DCRYSTAL_START_DELAY_NONSINK=20"]
+        cflags += ["-DSTART_DELAY_SINK=40", "-DSTART_DELAY_NONSINK=20"]
     else:
-        cflags += ["-DCRYSTAL_START_DELAY_SINK=0", "-DCRYSTAL_START_DELAY_NONSINK=0"]
+        cflags += ["-DSTART_DELAY_SINK=0", "-DSTART_DELAY_NONSINK=0"]
     
     cflags = " ".join(cflags)
     new_env = {"CFLAGS":cflags}
@@ -181,10 +182,10 @@ with open("nodelist.txt") as f:
 
 
 simnum = 0
-for (power, channel, sink, num_senders, longskip, n_empty, cca, nodemap) in itertools.product(powers, channels, sinks, num_senderss, longskips, n_emptys, ccas, nodemaps):
+for (power, channel, sink, num_senders, n_empty, cca, nodemap) in itertools.product(powers, channels, sinks, num_senderss, n_emptys, ccas, nodemaps):
     n_empty = NemptyTuple(*n_empty)
     cca = CcaTuple(*cca)
-    simdir = "sink%03d_snd%02d_p%02d_c%02d_e%.2f_ns%02d_nt%02d_na%02d_ds%02d_dt%02d_da%02d_syna%d_ls%02d_pl%03d_r%02dy%02dz%02dx%02d_dyn%d_cca%d_%d_fe%02d_%s_%s_%s_B%s"%(sink, num_senders, power, channel, period, n_tx_s, n_tx_t, n_tx_a, dur_s, dur_t, dur_a, sync_ack, longskip, payload, n_empty.r, n_empty.y, n_empty.z, n_empty.x, dyn_nempty, cca.dbm, cca.counter, full_epochs, testbed, nodemap, chmap, boot_chop)
+    simdir = "sink%03d_snd%02d_p%02d_c%02d_e%.2f_ns%02d_nt%02d_na%02d_ds%02d_dt%02d_da%02d_syna%d_pl%03d_r%02dy%02dz%02dx%02d_dyn%d_cca%d_%d_fe%02d_%s_%s_%s_B%s"%(sink, num_senders, power, channel, period, n_tx_s, n_tx_t, n_tx_a, dur_s, dur_t, dur_a, sync_ack, payload, n_empty.r, n_empty.y, n_empty.z, n_empty.x, dyn_nempty, cca.dbm, cca.counter, full_epochs, testbed, nodemap, chmap, boot_chop)
     if os.path.isdir(simdir):
         continue
     try:
@@ -205,7 +206,7 @@ for (power, channel, sink, num_senders, longskip, n_empty, cca, nodemap) in iter
         all_senders = [x for x in nodes if x!=sink]
 
 
-        new_env = mk_env(power, channel, sink, num_senders, longskip, n_empty, cca)
+        new_env = mk_env(power, channel, sink, num_senders, n_empty, cca)
         prepare_binary(simdir, all_senders, active_epochs, num_senders, new_env)
         if nodemap != "all":
             copy(nodemap_txt, os.path.join(simdir, "nodemap.txt"))
@@ -231,7 +232,6 @@ for (power, channel, sink, num_senders, longskip, n_empty, cca, nodemap) in iter
             p["dur_a"] = dur_a
             p["dur_t"] = dur_t
             p["sync_ack"] = sync_ack
-            p["longskip"] = longskip
             p["n_empty"] = n_empty.r
             p["n_empty.y"] = n_empty.y
             p["n_empty.z"] = n_empty.z
