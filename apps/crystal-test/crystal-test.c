@@ -171,6 +171,7 @@ void app_print_logs() {
 #define START_DELAY_NONSINK 0
 #endif
 
+
 PROCESS(crystal_test, "Crystal test");
 AUTOSTART_PROCESSES(&crystal_test);
 PROCESS_THREAD(crystal_test, ev, data) {
@@ -197,6 +198,7 @@ PROCESS_THREAD(crystal_test, ev, data) {
   conf.plds_T = sizeof(app_t_payload);
   conf.plds_A = sizeof(app_a_payload);
 
+  PRINT_CRYSTAL_CONFIG(conf);
   crystal_start(&conf);
 
   PROCESS_END();
