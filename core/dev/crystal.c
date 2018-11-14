@@ -202,7 +202,7 @@ struct send_info {
 
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-#define MAX_LOG_TAS 20 // XXX fix this! If set larger, there's no time to print everything at the end of the epoch
+#define MAX_LOG_TAS 30 // XXX fix this! If set larger, there's no time to print everything at the end of the epoch
 static struct recv_info recv_t[MAX_LOG_TAS];
 static int n_rec_rx; // number of receive records in the array
 
@@ -794,9 +794,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
           n_empty_ts ++;
         }
         cca_busy_cnt = get_cca_busy_cnt();
-
-        if (get_rx_cnt())
-          log_ta_rx();
+        log_ta_rx();
       }
 
       app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
