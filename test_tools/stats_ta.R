@@ -84,7 +84,7 @@ message("Nodes that logged sending something: ", length(sent_anything))
 print(sort(sent_anything))
 
 not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$length != CRYSTAL_DATA_LEN) | (recv$err_code != 0)
-wrong_packets = not_packets & (recv$err_code %in% c(CRYSTAL_BAD_DATA, CRYSTAL_BAD_CRC))
+wrong_packets = not_packets & (recv$err_code %in% c(CRYSTAL_BAD_DATA))
 
 recv_from = unique(recv[!not_packets, c("src")])
 message("Messages received from the following ", length(recv_from), " nodes")
@@ -94,8 +94,10 @@ message("Alive nodes that didn't work")
 lazy_nodes = setdiff(alive, c(heard_from, recv_from, sent_anything, SINK))
 lazy_nodes
 
-message("Packets of wrong types or length received (removing them):")
+message("Packets of wrong types or length received:")
 recv[wrong_packets,]
+
+message("Num packets with bad CRC: ", sum(recv$err_code == CRYSTAL_BAD_CRC))
 
 no_packet_ts = recv[recv$dst==SINK & not_packets & (recv$err_code %in% c(CRYSTAL_HIGH_NOISE, CRYSTAL_SILENCE)), c("epoch", "dst", "n_ta", "length", "err_code", "time")]
 write.table(no_packet_ts, "empty_t.log", row.names=F)
