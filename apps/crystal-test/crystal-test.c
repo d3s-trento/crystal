@@ -163,6 +163,8 @@ void app_print_logs() {
 }
 
 
+void app_crystal_start_done(bool success) {}
+
 #ifndef START_DELAY_SINK
 #define START_DELAY_SINK 0
 #endif

@@ -33,7 +33,9 @@ typedef struct {
   uint8_t scan_duration;
 } crystal_config_t;
 
-/* Crystal application interface (callbacks) */
+/* == Crystal application interface (callbacks) ==============================*/
+
+void app_crystal_start_done(bool success);
 uint8_t* app_pre_S();
 void app_post_S(int received, uint8_t* payload);
 uint8_t* app_pre_T();
@@ -43,12 +45,16 @@ void app_epoch_end();
 void app_ping();
 void app_print_logs();
 
-bool crystal_start(crystal_config_t* conf);
+void crystal_init();
+
 crystal_config_t crystal_get_config();
+bool crystal_start(crystal_config_t* conf);
 
 typedef struct {
   crystal_epoch_t epoch;
-  //uint16_t n_ta;
+  uint16_t n_ta;
+  uint16_t n_missed_s;
+  uint8_t hops;
 } crystal_info_t;
 
 extern crystal_info_t crystal_info;

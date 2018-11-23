@@ -357,6 +357,8 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
   static rtimer_clock_t ref_time;
   PT_BEGIN(&pt);
 
+  app_crystal_start_done(true);
+
   leds_off(LEDS_RED);
   ref_time = RTIMER_NOW() + OSC_STAB_TIME + GLOSSY_PRE_TIME + 16; // + 16 just to be sure
   t_phase_start = ref_time;
@@ -367,6 +369,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
     cc2420_oscon();
 
+    crystal_info.n_ta = 0;
     payload = app_pre_S();
 
     // wait for the oscillator to stabilize
@@ -408,6 +411,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
     while (!sleep_order && n_ta < CRYSTAL_MAX_TAS) {
       init_ta_log_vars();
+      crystal_info.n_ta = n_ta;
 
       // -- Phase T (root) ----------------------------------------------------------------- T (root) ---
       t_phase_start = ref_time - CRYSTAL_SHORT_GUARD + PHASE_T_OFFS(n_ta);
@@ -603,6 +607,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
   if (recvtype_S != CRYSTAL_TYPE_SYNC)
     bzero(&glossy_S, sizeof(glossy_S)); // reset the timing info if a non-S packet was received
 
+  app_crystal_start_done(true);
   BZERO_BUF();
   leds_off(LEDS_RED);
 
@@ -658,6 +663,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
   while (1) {
     init_epoch_state();
+    crystal_info.n_ta = 0;
 
     if (!skip_S) {
       cc2420_oscon();
@@ -729,6 +735,9 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       BZERO_BUF();
 
       starting_n_ta = 0;
+      
+      crystal_info.hops = hopcount;
+      crystal_info.n_missed_s = sync_missed;
     }
     skip_S = 0;
 
@@ -742,6 +751,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       static int i_tx;
 
       init_ta_log_vars();
+      crystal_info.n_ta = n_ta;
       correct_packet = 0;
       payload = app_pre_T();
       have_packet = payload != NULL;
@@ -958,9 +968,9 @@ static void tune_AGC_radio() {
 bool crystal_start(crystal_config_t* conf_)
 {
   // check the config
-  if (sizeof(crystal_sync_hdr_t) + conf.plds_S > CRYSTAL_MAX_DATA_LEN ||
-      sizeof(crystal_data_hdr_t) + conf.plds_T > CRYSTAL_MAX_DATA_LEN ||
-      sizeof(crystal_ack_hdr_t)  + conf.plds_A > CRYSTAL_MAX_DATA_LEN)
+  if (sizeof(crystal_sync_hdr_t) + conf_->plds_S > CRYSTAL_MAX_DATA_LEN ||
+      sizeof(crystal_data_hdr_t) + conf_->plds_T > CRYSTAL_MAX_DATA_LEN ||
+      sizeof(crystal_ack_hdr_t)  + conf_->plds_A > CRYSTAL_MAX_DATA_LEN)
     return false;
 
   // TODO: check the rest of the config
@@ -991,10 +1001,10 @@ bool crystal_start(crystal_config_t* conf_)
   return true;
 }
 
+void crystal_stop() {/* TODO */}
 #if CRYSTAL_LOGGING
 PROCESS_THREAD(crystal_print_stats_process, ev, data)
 {
-  static int i;
   static int noise;
   static int first_time = 1;
   static unsigned long avg_radio_on;
@@ -1017,6 +1027,7 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
     }
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
+    static int i;
     printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_rx, noise, scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
     for (i=0; i<n_rec_rx; i++) {
       printf("T %u:%u %u %u %u %u %u %u %u\n", epoch, i,
