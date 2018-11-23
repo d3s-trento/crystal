@@ -729,7 +729,11 @@ inline void glossy_end_rx(void) {
   // read the remaining bytes from the RXFIFO
   FASTSPI_READ_FIFO_NO_WAIT(&packet[bytes_read], packet_len_tmp - bytes_read + 1);
   bytes_read = packet_len_tmp + 1;
+#if COOJA
+  if ((GLOSSY_CRC_FIELD & FOOTER1_CRC_OK) && (ignore_type || (GLOSSY_HEADER_FIELD & GLOSSY_APP_HEADER_MASK) == app_header)) {
+#else
   if (GLOSSY_CRC_FIELD & FOOTER1_CRC_OK) {
+#endif /* COOJA */
     // packet correctly received
     recv_sync = (GLOSSY_HEADER_FIELD & GLOSSY_HEADER_SYNC_BIT) != 0;
     if (sync != recv_sync) {
