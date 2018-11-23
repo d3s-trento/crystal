@@ -40,12 +40,12 @@
 #include "node-id.h"
 
 union {
-  uint8_t raw[CRYSTAL_MAX_DATA_LEN];
+  uint8_t raw[CRYSTAL_PKTBUF_LEN];
   crystal_sync_hdr_t sync_hdr;
   crystal_data_hdr_t data_hdr;
   crystal_ack_hdr_t ack_hdr;
 } buf;
-#define BZERO_BUF() bzero(buf.raw, CRYSTAL_MAX_DATA_LEN)
+#define BZERO_BUF() bzero(buf.raw, CRYSTAL_PKTBUF_LEN)
 
 
 crystal_config_t conf = {
@@ -409,7 +409,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     BZERO_BUF();
     // -- Phase S end (root) --------------------------------------------------------- S end (root) ---
 
-    while (!sleep_order && n_ta < CRYSTAL_MAX_TAS) {
+    while (!sleep_order && n_ta < CRYSTAL_MAX_TAS) { /* TA loop */
       init_ta_log_vars();
       crystal_info.n_ta = n_ta;
 
@@ -504,7 +504,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
       // -- Phase A end (root) --------------------------------------------------------- A end (root) ---
 
       n_ta ++;
-    }
+    } /* End of TA loop */
     app_epoch_end();
 
     cc2420_oscoff(); // put radio to deep sleep
@@ -968,9 +968,9 @@ static void tune_AGC_radio() {
 bool crystal_start(crystal_config_t* conf_)
 {
   // check the config
-  if (sizeof(crystal_sync_hdr_t) + conf_->plds_S > CRYSTAL_MAX_DATA_LEN ||
-      sizeof(crystal_data_hdr_t) + conf_->plds_T > CRYSTAL_MAX_DATA_LEN ||
-      sizeof(crystal_ack_hdr_t)  + conf_->plds_A > CRYSTAL_MAX_DATA_LEN)
+  if (sizeof(crystal_sync_hdr_t) + conf_->plds_S > CRYSTAL_PKTBUF_LEN ||
+      sizeof(crystal_data_hdr_t) + conf_->plds_T > CRYSTAL_PKTBUF_LEN ||
+      sizeof(crystal_ack_hdr_t)  + conf_->plds_A > CRYSTAL_PKTBUF_LEN)
     return false;
 
   // TODO: check the rest of the config
