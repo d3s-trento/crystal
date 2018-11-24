@@ -20,4 +20,4 @@ The easiest way to build a binary (or a set of binaries) is to define parameter 
 
 A good starting point for defining your parameter set can be found in the `exps/example/` directory. You may copy the whole directory and edit the parameters and the list of nodes present in the testbed. After that, run `../../test_tools/simgen_ta.py`. It will create one or several subdirectories (if they don't exist) named after the individual parameter sets defined in the `params.py` file. 
 
-To build for Cooja, go to `apps/crystal`, run `./make_cooja.sh` and start Cooja with, e.g., `mrm.csc`.
+To build for Cooja, go to `apps/crystal`, run `./build_cooja.sh` and start Cooja with, e.g., `mrm.csc`.
