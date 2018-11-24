@@ -1,0 +1,4 @@
+[submodule "cooja"]
+	path = cooja
+	url = https://github.com/d3s-trento/cooja
+	branch = master
