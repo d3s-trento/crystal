@@ -69,6 +69,10 @@ static rtimer_clock_t t_start_l;
 static uint8_t channel, app_header, rx_data_len, rx_bad_crc;
 static uint8_t expected_header;
 
+#ifndef PATCHED_COOJA
+#define PATCHED_COOJA 1
+#endif
+
 /* --------------------------- Radio functions ---------------------- */
 static inline void radio_flush_tx(void) {
   FASTSPI_STROBE(CC2420_SFLUSHTX);
@@ -301,8 +305,11 @@ PROCESS_THREAD(glossy_process, ev, ev_data) {
       }
     };
 #if COOJA
+    // Note: this avoids some artifacts in Cooja's timeline
+    // but makes Glossy not respect slot boundaries
     while (glossy_state == GLOSSY_STATE_TRANSMITTING);
 #endif /* COOJA */
+    leds_off(LEDS_BLUE);
 
     glossy_object->T_slot_h     = T_slot_h;
     glossy_object->T_slot_h_sum = T_slot_h_sum;
@@ -678,7 +685,7 @@ inline void glossy_begin_rx(void) {
     t_rx_timeout = t_rx_start + ((rtimer_clock_t)packet_len_tmp * 35 + 200) * 4;
   }
 
-#if !COOJA
+#if !COOJA || PATCHED_COOJA
   // wait until the FIFO pin is 1 (i.e., until the second byte is received)
   while (!FIFO_IS_1) {
     if (!RTIMER_CLOCK_LT(RTIMER_NOW_DCO(), t_rx_timeout)) {
@@ -719,7 +726,7 @@ inline void glossy_begin_rx(void) {
       bytes_read++;
     }
   }
-#endif /* COOJA */
+#endif /* !COOJA || PATCHED_COOJA */
   glossy_schedule_rx_timeout();
 }
 
@@ -729,11 +736,11 @@ inline void glossy_end_rx(void) {
   // read the remaining bytes from the RXFIFO
   FASTSPI_READ_FIFO_NO_WAIT(&packet[bytes_read], packet_len_tmp - bytes_read + 1);
   bytes_read = packet_len_tmp + 1;
-#if COOJA
+#if COOJA && !PATCHED_COOJA
   if ((GLOSSY_CRC_FIELD & FOOTER1_CRC_OK) && (ignore_type || (GLOSSY_HEADER_FIELD & GLOSSY_APP_HEADER_MASK) == app_header)) {
 #else
   if (GLOSSY_CRC_FIELD & FOOTER1_CRC_OK) {
-#endif /* COOJA */
+#endif
     // packet correctly received
     recv_sync = (GLOSSY_HEADER_FIELD & GLOSSY_HEADER_SYNC_BIT) != 0;
     if (sync != recv_sync) {
