@@ -3,9 +3,8 @@
 
 #include "crystal.h"
 
-//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms
-#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms
-//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 625) // 1.6 ms
+#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms (for long packets)
+//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms (for short packets)
 
 //#define CRYSTAL_SHORT_GUARD           5
 #define CRYSTAL_SHORT_GUARD           5
