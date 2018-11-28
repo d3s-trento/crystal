@@ -30,3 +30,13 @@ You can specify "cooja" in the testbed name to compile for Cooja, list the node 
 ## Notes on Cooja
 
 The repository has submodules for fixed Cooja and MSPsim that are recommended for Glossy/Crystal. The patch fixes a problem in the CC2420 emulation of MSPsim that prevents Glossy from reading the packet from FIFO while it is being received. This allows running tests with longer packets (up to 75 bytes) in Cooja. With unpatched Cooja only very short packets are supported (few bytes). Note that if you want to use the unpatched Cooja you need to define PATCHED_COOJA=0.
+
+To use Cooja you will need JDK 8. To install and compile Cooja, do the following: 
+
+```
+git submodule update --init
+cd tools/cooja
+git submodule update --init
+cd ../..
+ant jar
+```
