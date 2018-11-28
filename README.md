@@ -6,7 +6,7 @@ Crystal got the [2nd prize](https://iti-testbed.tugraz.at/blog/page/11/ewsn-18-d
 ## Publications
 
  * **Data Prediction + Synchronous Transmissions = Ultra-low Power Wireless Sensor Networks**, Timofei Istomin, Amy L. Murphy, Gian Pietro Picco, Usman Raza.  In Proceedings of the 14th ACM Conference on Embedded Networked Sensor Systems (SenSys 2016), Stanford (CA, USA), November 2016, [PDF](http://disi.unitn.it/~picco/papers/sensys16.pdf)
- * **Interference-Resilient Ultra-Low Power Aperiodic Data Collection**, Timofei Istomin, Matteo Trobinger, Amy L. Murphy, Gian Pietro Picco.  In Proceedings of the International Conference on Information Processing in Sensor Networks (IPSN 2018), to appear.
+ * **Interference-Resilient Ultra-Low Power Aperiodic Data Collection**, Timofei Istomin, Matteo Trobinger, Amy L. Murphy, Gian Pietro Picco.  In Proceedings of the International Conference on Information Processing in Sensor Networks (IPSN 2018), [PDF](http://disi.unitn.it/~picco/papers/ipsn18.pdf).
 
 ## Status
 Currently the protocol is implemented for the TMote Sky platform only. Porting it to more modern platforms is in our near future plans.
@@ -27,4 +27,4 @@ You can specify "cooja" in the testbed name to compile for Cooja, list the node 
 
 ## Notes on Cooja
 
-The repository has a submodule for fixed Cooja and MSPsim that are recommended for Glossy/Crystal. The patch fixes a problem in the CC2420 emulation of MSPsim that prevents Glossy from reading the packet from FIFO while it is being received. This allows running tests with longer packets (up to 75 bytes) in Cooja. With unpatched Cooja only very short packets are supported (few bytes). Note that if you want to use the unpatched Cooja you need to define UNPATCHED_COOJA=1.
+The repository has submodules for fixed Cooja and MSPsim that are recommended for Glossy/Crystal. The patch fixes a problem in the CC2420 emulation of MSPsim that prevents Glossy from reading the packet from FIFO while it is being received. This allows running tests with longer packets (up to 75 bytes) in Cooja. With unpatched Cooja only very short packets are supported (few bytes). Note that if you want to use the unpatched Cooja you need to define PATCHED_COOJA=0.
