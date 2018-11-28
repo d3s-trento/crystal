@@ -15,9 +15,16 @@ The **master** branch is the main development branch of Crystal. It integrates s
 
 ***Disclaimer:*** *Although we tested the code extensively, Crystal is a research prototype that likely contains bugs. We take no responsibility for and give no warranties in respect of using the code.*
 
-## Build instructions
-The easiest way to build a binary (or a set of binaries) is to define parameter set(s) in `params.py` file and use the `test_tools/simgen_ta.py` script. 
+## Examples
+You can find a very simple example in `apps/crystal-test-simple`. Refer to the `README` file there for building instructions for Cooja and TMote Sky.
+
+## Testing in testbeds
+To run experiments with different sets of parameters you can build a binary (or a set of binaries) using the `test_tools/simgen_ta.py` script. It reads the parameter set(s) from `params.py` file.
 
 A good starting point for defining your parameter set can be found in the `exps/example/` directory. You may copy the whole directory and edit the parameters and the list of nodes present in the testbed. After that, run `../../test_tools/simgen_ta.py`. It will create one or several subdirectories (if they don't exist) named after the individual parameter sets defined in the `params.py` file. 
 
-To build for Cooja, go to `apps/crystal`, run `./build_cooja.sh` and start Cooja with, e.g., `mrm.csc`.
+You can specify "cooja" in the testbed name to compile for Cooja, list the node IDs, and use MRM radio model for simulations (e.g., one defined in `apps/crystal-test-simple/mrm.csc`).
+
+## Notes on Cooja
+
+The repository has a submodule for fixed Cooja and MSPsim that are recommended for Glossy/Crystal. The patch fixes a problem in the CC2420 emulation of MSPsim that prevents Glossy from reading the packet from FIFO while it is being received. This allows running tests with longer packets (up to 75 bytes) in Cooja. With unpatched Cooja only very short packets are supported (few bytes). Note that if you want to use the unpatched Cooja you need to define UNPATCHED_COOJA=1.
