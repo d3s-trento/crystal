@@ -309,7 +309,7 @@ PROCESS_THREAD(glossy_process, ev, ev_data) {
     // but makes Glossy not respect slot boundaries
     while (glossy_state == GLOSSY_STATE_TRANSMITTING);
 #endif /* COOJA */
-    leds_off(LEDS_BLUE);
+    //leds_off(LEDS_BLUE);
 
     glossy_object->T_slot_h     = T_slot_h;
     glossy_object->T_slot_h_sum = T_slot_h_sum;

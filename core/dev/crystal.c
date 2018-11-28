@@ -359,7 +359,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
   app_crystal_start_done(true);
 
-  leds_off(LEDS_RED);
+  //leds_off(LEDS_RED);
   ref_time = RTIMER_NOW() + OSC_STAB_TIME + GLOSSY_PRE_TIME + 16; // + 16 just to be sure
   t_phase_start = ref_time;
   while (1) {
@@ -609,7 +609,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
   app_crystal_start_done(true);
   BZERO_BUF();
-  leds_off(LEDS_RED);
+  //leds_off(LEDS_RED);
 
   // useful for debugging in Cooja
   //rtimer_set(t, RTIMER_NOW() + 15670, timer_handler, ptr);
@@ -983,7 +983,7 @@ bool crystal_start(crystal_config_t* conf_)
   else
     timer_handler = nonsink_timer_handler;
 
-  leds_on(LEDS_RED);
+  //leds_on(LEDS_RED);
 
   channel = RF_CHANNEL;
   cc2420_set_txpower(TX_POWER);
