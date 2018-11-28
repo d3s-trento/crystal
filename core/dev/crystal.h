@@ -10,45 +10,85 @@ typedef uint8_t crystal_addr_t; // IPSN'18
 //typedef uint8_t crystal_epoch_t; // NOT SUPPORTED !
 typedef uint16_t crystal_epoch_t; // IPSN'18
 
-
 typedef struct {
-  uint32_t period;
-  uint8_t is_sink;
-  uint8_t ntx_S;
-  uint16_t w_S;
-  uint8_t plds_S;
-  uint8_t ntx_T;
-  uint16_t w_T;
-  uint8_t plds_T;
-  uint8_t ntx_A;
-  uint16_t w_A;
-  uint8_t plds_A;
-  uint8_t r;
-  uint8_t y;
-  uint8_t z;
-  uint8_t x;
-  uint8_t xa;
-  uint16_t ch_whitelist;
-  uint8_t enc_enable;
-  uint8_t scan_duration;
+  uint32_t period;   // Crystal period in rtimer clock ticks
+  uint8_t is_sink;   // Is this node the sink
+  uint8_t ntx_S;     // Number of Glossy TX in S slots
+  uint16_t w_S;      // Max duration of S slots in rtimer ticks
+  uint8_t plds_S;    // App. payload size for S slots
+  uint8_t ntx_T;     // Number of Glossy TX in T slots
+  uint16_t w_T;      // Max duration of T slots in rtimer ticks
+  uint8_t plds_T;    // App. payload size for T slots
+  uint8_t ntx_A;     // Number of Glossy TX in A slots
+  uint16_t w_A;      // Max duration of A slots in rtimer ticks
+  uint8_t plds_A;    // App. payload size for A slots
+  uint8_t r;         // Number of empty T slots triggering epoch termination at the sink
+  uint8_t y;         // Number of empty TA pairs triggering epoch termination at a non-transmitting node
+  uint8_t z;         // Number of empty A slots triggering epoch termination at a transmitting node
+  uint8_t x;         // Max. number of TA pairs added when high noise is detected at the sink
+  uint8_t xa;        // Max. number of TA pairs added when high noise is detected at a non-sink node
+  uint16_t ch_whitelist; // Channel whitelist (TBD)
+  uint8_t enc_enable;    // Glossy-level encryption enabled (not supported)
+  uint8_t scan_duration; // Scan duration in number of epochs (TBD)
 } crystal_config_t;
 
 /* == Crystal application interface (callbacks) ==============================*/
 
+/* An interrupt-context callback called by Crystal when it starts or joins a net
+ */
 void app_crystal_start_done(bool success);
+
+/* An interrupt-context callback called by Crystal before each S slot.
+ *
+ * returned value: pointer to the application payload for S slot */
 uint8_t* app_pre_S();
+
+/* An interrupt-context callback called by Crystal after S slot.
+ * - received: whether a correct packet was received in the slot
+ * - payload: pointer to the application payload in T slot packets
+ */
 void app_post_S(int received, uint8_t* payload);
+
+/* An interrupt-context callback called by Crystal before each T slot.
+ * 
+ * returned value: pointer to the application payload for T slot */
 uint8_t* app_pre_T();
+
+/* An interrupt-context callback called by Crystal after each T slot.
+ * - received: whether a correct packet was received in the slot
+ * - payload: pointer to the application payload in T slot packets
+ * 
+ * returned value: pointer to the application payload for A slot */
 uint8_t* app_between_TA(int received, uint8_t* payload);
+
+/* An interrupt-context callback called by Crystal after each A slot.
+ * - received: whether a correct packet was received in the slot
+ * - payload: pointer to the application payload in A slot packets */
 void app_post_A(int received, uint8_t* payload);
+
+/* An interrupt-context callback that signals the end of the active
+ * part of the epoch */
 void app_epoch_end();
+
+/* An interrupt-context callback that pings the app periodically during 
+ * inactive portion of each epoch (deprecated) */
 void app_ping();
+
+/* A process-context callback to print application logs (deprecated) */
 void app_print_logs();
 
+
+/* == Crystal application interface (requests) ===============================*/
+
+/* Init Crystal (to be called once at boot) */
 void crystal_init();
 
+/* Read the current configuration */
 crystal_config_t crystal_get_config();
+
+/* Start Crystal with the given configuration */
 bool crystal_start(crystal_config_t* conf);
+
 
 typedef struct {
   crystal_epoch_t epoch;
@@ -57,7 +97,9 @@ typedef struct {
   uint8_t hops;
 } crystal_info_t;
 
+/* A variable holding the current state of Crystal */
 extern crystal_info_t crystal_info;
+
 
 #define PRINT_CRYSTAL_CONFIG(conf) do {\
  printf("Crystal config. Node ID %x\n", node_id);\

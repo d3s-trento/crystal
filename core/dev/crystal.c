@@ -39,7 +39,7 @@
 #include "cc2420.h"
 #include "node-id.h"
 
-union {
+static union {
   uint8_t raw[CRYSTAL_PKTBUF_LEN];
   crystal_sync_hdr_t sync_hdr;
   crystal_data_hdr_t data_hdr;
@@ -48,7 +48,7 @@ union {
 #define BZERO_BUF() bzero(buf.raw, CRYSTAL_PKTBUF_LEN)
 
 
-crystal_config_t conf = {
+static crystal_config_t conf = {
   .period  = CRYSTAL_CONF_PERIOD,
   .is_sink = CRYSTAL_CONF_IS_SINK,
   .ntx_S   = CRYSTAL_CONF_NTX_S,
@@ -73,7 +73,7 @@ crystal_config_t conf = {
 
 crystal_info_t crystal_info;          // public read-only status information about Crystal
 
-uint8_t* payload;                     // application payload pointer for the current slot
+static uint8_t* payload;                     // application payload pointer for the current slot
 
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy structure to be used in different phases
 
@@ -524,7 +524,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
     while ((int16_t)(t_wakeup - (RTIMER_NOW() + APP_PING_INTERVAL)) > 16) {
       rtimer_set(t, RTIMER_NOW() + APP_PING_INTERVAL, timer_handler, ptr);
-      app_ping();
+      app_ping(); // deprecated, will be removed
       PT_YIELD(&pt);
     }
 
@@ -943,7 +943,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
     while ((int16_t)(t_wakeup - (RTIMER_NOW() + APP_PING_INTERVAL)) > 16) {
       rtimer_set(t, RTIMER_NOW() + APP_PING_INTERVAL, timer_handler, ptr);
-      app_ping();
+      app_ping(); // deprecated, will be removed
       PT_YIELD(&pt);
     }
 
@@ -1050,7 +1050,7 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
     n_rec_tx = 0;
 #endif
 #endif
-    app_print_logs();
+    //app_print_logs(); // deprecated! use the epoch end callback instead
     /*printf("D %u:%u %lu %u:%u %lu %u\n", epoch,
       glossy_S.T_slot_h, glossy_S.T_slot_h_sum, glossy_S.win_cnt,
       glossy_A.T_slot_h, glossy_A.T_slot_h_sum, glossy_A.win_cnt
