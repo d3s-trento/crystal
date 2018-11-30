@@ -37,6 +37,5 @@ To use Cooja you will need JDK 8. To install and compile Cooja, do the following
 git submodule update --init
 cd tools/cooja
 git submodule update --init
-cd ../..
 ant jar
 ```
