@@ -1,6 +1,8 @@
 #ifndef CRYSTAL_TEST_H
 #define CRYSTAL_TEST_H
 
+#define PAYLOAD_LENGTH 2
+
 #include "crystal.h"
 #define NO_NODE 0
 #define NO_SEQN 65535

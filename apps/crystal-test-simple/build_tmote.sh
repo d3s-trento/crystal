@@ -9,11 +9,6 @@
 
 CFLAGS+=" -DSINK_ID=1" # the sink node id
 
-CFLAGS+=" -DTX_POWER=31 -DRF_CHANNEL=26"
-CFLAGS+=" -DPAYLOAD_LENGTH=2"
-#CFLAGS+=" -DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_EPOCH_STATS"
-CFLAGS+=" -DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_NONE"
-CFLAGS+=" -DCRYSTAL_CONF_N_FULL_EPOCHS=0"
 
 if [ $# -lt 1 ]; 
     then echo "Specify the node ID"
@@ -23,11 +18,10 @@ fi
 NODE_ID=$1
 CFLAGS+=" -DNODE_ID=$NODE_ID"
 
-
 export CFLAGS
 
 make clean
 rm crystal-test.sky
 
 make && mv crystal-test.sky crystal-test-$NODE_ID.sky
-rm -f sndtbl.c symbols.h symbols.c
+rm -f symbols.h symbols.c

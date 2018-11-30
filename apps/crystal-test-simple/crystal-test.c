@@ -187,11 +187,11 @@ void app_crystal_start_done(bool success) {
 }
 
 #ifndef START_DELAY_SINK
-#define START_DELAY_SINK 0
+#define START_DELAY_SINK 1
 #endif
 
 #ifndef START_DELAY_NONSINK
-#define START_DELAY_NONSINK 0
+#define START_DELAY_NONSINK 1
 #endif
 
 
@@ -227,6 +227,7 @@ PROCESS_THREAD(crystal_test, ev, data) {
     PROCESS_WAIT_EVENT();
     if (ev==EPOCH_END_EV) {
       int i;
+      crystal_print_epoch_logs();
       if (is_sink) {
         for (i=0; i<n_pkt_recv; i++) {
           printf("Recv %u:%u %u %u\n", crystal_info.epoch, 
@@ -253,8 +254,5 @@ PROCESS_THREAD(crystal_test, ev, data) {
 }
 
 
-
-// Deprecated callbacks
-void app_ping() {}
-void app_print_logs() {}
+void app_pre_epoch() {}
 
