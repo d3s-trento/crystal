@@ -33,6 +33,9 @@
  *
  */
 
+#define CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL 328 // ~ 10 ms 
+
+
 #include "crystal.h"
 #include "crystal-conf.h"
 #include "crystal-private.h"
@@ -155,7 +158,7 @@ static uint16_t log_send_acked;
 //#endif
 #define CRYSTAL_MAX_ACTIVE_TIME (conf.period - RTIMER_SECOND/3 - LOGGING_GAP)
 #else
-#define CRYSTAL_MAX_ACTIVE_TIME (conf.period - CRYSTAL_INIT_GUARD - CRYSTAL_INTER_PHASE_GAP - 100)
+#define CRYSTAL_MAX_ACTIVE_TIME (conf.period - CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL - CRYSTAL_INIT_GUARD - CRYSTAL_INTER_PHASE_GAP - 100)
 #endif
 
 #define CRYSTAL_MAX_TAS (((unsigned int)(CRYSTAL_MAX_ACTIVE_TIME - TAS_START_OFFS))/(TA_DURATION))
@@ -522,11 +525,9 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     // time to wake up to prepare for the next epoch
     t_wakeup = t_phase_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
-    while ((int16_t)(t_wakeup - (RTIMER_NOW() + APP_PING_INTERVAL)) > 16) {
-      rtimer_set(t, RTIMER_NOW() + APP_PING_INTERVAL, timer_handler, ptr);
-      app_ping(); // deprecated, will be removed
-      PT_YIELD(&pt);
-    }
+    rtimer_set(t, t_wakeup - CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL, timer_handler, ptr);
+    PT_YIELD(&pt);
+    app_ping();
 
     rtimer_set(t, t_wakeup, timer_handler, ptr);
     PT_YIELD(&pt);
@@ -941,11 +942,9 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
     // time to wake up to prepare for the next epoch
     t_wakeup = t_phase_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
-    while ((int16_t)(t_wakeup - (RTIMER_NOW() + APP_PING_INTERVAL)) > 16) {
-      rtimer_set(t, RTIMER_NOW() + APP_PING_INTERVAL, timer_handler, ptr);
-      app_ping(); // deprecated, will be removed
-      PT_YIELD(&pt);
-    }
+    rtimer_set(t, t_wakeup - CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL, timer_handler, ptr);
+    PT_YIELD(&pt);
+    app_ping();
 
     rtimer_set(t, t_wakeup, timer_handler, ptr);
     PT_YIELD(&pt);

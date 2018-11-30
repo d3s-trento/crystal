@@ -6,9 +6,7 @@
 #define  CHMAP_comb10       6
 #define  CHMAP_comb07       7
 
-#define BSTRAP_nohop 0
-#define BSTRAP_hop1  1
-#define BSTRAP_hop2  2
+#define BSTRAP_nohop 1
 #define BSTRAP_hop3  3
 
 #if CRYSTAL_CHHOP_MAPPING == CHMAP_nohop
