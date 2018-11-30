@@ -33,7 +33,6 @@
  *
  */
 
-#define CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL 328 // ~ 10 ms 
 
 
 #include "crystal.h"
@@ -146,21 +145,7 @@ static uint16_t log_send_acked;
 #define TAS_START_OFFS (CRYSTAL_INIT_GUARD*2 + conf.w_S + CRYSTAL_INTER_PHASE_GAP)
 #define PHASE_T_OFFS(n) (TAS_START_OFFS + (n)*TA_DURATION)
 #define PHASE_A_OFFS(n) (PHASE_T_OFFS(n) + (conf.w_T + CRYSTAL_INTER_PHASE_GAP))
-
-
-#if CRYSTAL_LOGGING
-#define LOGGING_GAP 100 // give 3 ms gap after the last TA before printing 
-// this should be set in accordance with the slot durations so that
-// the max number of TAs fits into the period minus time needed for
-// printing the logs
-//#if CRYSTAL_PERIOD < RTIMER_SECOND/3 + LOGGING_GAP + CRYSTAL_INIT_GUARD + conf.w_S + CRYSTAL_INTER_PHASE_GAP + 100
-//#error Period is too short for printing
-//#endif
-#define CRYSTAL_MAX_ACTIVE_TIME (conf.period - RTIMER_SECOND/3 - LOGGING_GAP)
-#else
-#define CRYSTAL_MAX_ACTIVE_TIME (conf.period - CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL - CRYSTAL_INIT_GUARD - CRYSTAL_INTER_PHASE_GAP - 100)
-#endif
-
+#define CRYSTAL_MAX_ACTIVE_TIME (conf.period - CRYSTAL_TIME_FOR_APP - CRYSTAL_APP_PRE_EPOCH_CB_TIME - CRYSTAL_INIT_GUARD - CRYSTAL_INTER_PHASE_GAP - 100)
 #define CRYSTAL_MAX_TAS (((unsigned int)(CRYSTAL_MAX_ACTIVE_TIME - TAS_START_OFFS))/(TA_DURATION))
 
 
@@ -269,7 +254,7 @@ static inline void log_ta_tx() {
 } while(0)
 
 
-//#if PRINT_GRAZ && CRYSTAL_LOGGING
+//#if PRINT_GRAZ
 #if 0
 #define PRINT_BUF_SIZE 50
 static char print_buf[PRINT_BUF_SIZE];
@@ -289,11 +274,6 @@ static char print_buf[PRINT_BUF_SIZE];
 #define CRYSTAL_S_LEN (sizeof(crystal_sync_hdr_t) + conf.plds_S)
 #define CRYSTAL_T_LEN (sizeof(crystal_data_hdr_t) + conf.plds_T)
 #define CRYSTAL_A_LEN (sizeof(crystal_ack_hdr_t)  + conf.plds_A)
-
-
-#if CRYSTAL_LOGGING
-PROCESS(crystal_print_stats_process, "Crystal print stats");
-#endif //CRYSTAL_LOGGING
 
 
 // workarounds for wrong ref time reported by glossy (which happens VERY rarely)
@@ -508,16 +488,8 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
       n_ta ++;
     } /* End of TA loop */
-    app_epoch_end();
 
     cc2420_oscoff(); // put radio to deep sleep
-
-#if CRYSTAL_LOGGING
-    // Now we have a long pause, good time to print
-    rtimer_set(t, ref_time + PHASE_T_OFFS(CRYSTAL_MAX_TAS) + LOGGING_GAP, timer_handler, ptr);
-    PT_YIELD(&pt);
-    process_poll(&crystal_print_stats_process);
-#endif //CRYSTAL_LOGGING
 
     ref_time += conf.period;
     t_phase_start = ref_time;
@@ -525,9 +497,10 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     // time to wake up to prepare for the next epoch
     t_wakeup = t_phase_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
-    rtimer_set(t, t_wakeup - CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL, timer_handler, ptr);
+    rtimer_set(t, t_wakeup - CRYSTAL_APP_PRE_EPOCH_CB_TIME, timer_handler, ptr);
+    app_epoch_end();
     PT_YIELD(&pt);
-    app_ping();
+    app_pre_epoch();
 
     rtimer_set(t, t_wakeup, timer_handler, ptr);
     PT_YIELD(&pt);
@@ -923,14 +896,6 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       n_noack_epochs ++;
     }
     cc2420_oscoff(); // deep sleep
-    app_epoch_end();
-
-#if CRYSTAL_LOGGING
-    // Now we have a long pause, good time to print
-    rtimer_set(t, corrected_ref_time + PHASE_T_OFFS(CRYSTAL_MAX_TAS) + LOGGING_GAP - CRYSTAL_REF_SHIFT, timer_handler, ptr);
-    PT_YIELD(&pt);
-    process_poll(&crystal_print_stats_process);
-#endif //CRYSTAL_LOGGING
 
     s_guard = (!skew_estimated || sync_missed >= N_MISSED_FOR_INIT_GUARD)?CRYSTAL_INIT_GUARD:CRYSTAL_LONG_GUARD;
 
@@ -942,9 +907,10 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
     // time to wake up to prepare for the next epoch
     t_wakeup = t_phase_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
-    rtimer_set(t, t_wakeup - CRYSTAL_APP_EPOCH_NOTIFICATION_INTERVAL, timer_handler, ptr);
+    rtimer_set(t, t_wakeup - CRYSTAL_APP_PRE_EPOCH_CB_TIME, timer_handler, ptr);
+    app_epoch_end();
     PT_YIELD(&pt);
-    app_ping();
+    app_pre_epoch();
 
     rtimer_set(t, t_wakeup, timer_handler, ptr);
     PT_YIELD(&pt);
@@ -989,10 +955,6 @@ bool crystal_start(crystal_config_t* conf_)
   cc2420_set_cca_threshold(CRYSTAL_CCA_THRESHOLD);
   //tune_AGC_radio();
 
-#if CRYSTAL_LOGGING
-  // Start print stats processes.
-  process_start(&crystal_print_stats_process, NULL);
-#endif // CRYSTAL_LOGGING
   // Start Glossy busy-waiting process.
   process_start(&glossy_process, NULL);
   // Start Crystal
@@ -1001,35 +963,32 @@ bool crystal_start(crystal_config_t* conf_)
 }
 
 void crystal_stop() {/* TODO */}
-#if CRYSTAL_LOGGING
-PROCESS_THREAD(crystal_print_stats_process, ev, data)
-{
-  static int noise;
+
+crystal_print_epoch_logs() {
+  int noise;
   static int first_time = 1;
-  static unsigned long avg_radio_on;
-  static uint16_t scan_channel;
-  PROCESS_BEGIN();
+  unsigned long avg_radio_on;
+  uint16_t scan_channel;
 
-  while(1) {
-    PROCESS_YIELD_UNTIL(ev == PROCESS_EVENT_POLL);
 #if CRYSTAL_LOGLEVEL
-    scan_channel = channel_array[epoch % get_num_channels()];
-    cc2420_set_channel(scan_channel);
-    cc2420_oscon();
-    noise = cc2420_rssi();
-    cc2420_oscoff();
 
+  /* Noise scanning. TODO move to the Crystal timer handler */
+  //scan_channel = channel_array[epoch % get_num_channels()];
+  //cc2420_set_channel(scan_channel);
+  //cc2420_oscon();
+  //noise = cc2420_rssi();
+  //cc2420_oscoff();
 
-    if (!conf.is_sink) {
-      printf("S %u:%u %u %u:%u %d %u\n", epoch, n_ta_tx, n_all_acks, synced_with_ack, sync_missed, period_skew, hopcount);
-      printf("P %u:%u %u %u:%u %u %u %d:%ld\n", epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, ack_skew_err, end_of_s_time);
-    }
+  if (!conf.is_sink) {
+    printf("S %u:%u %u %u:%u %d %u\n", epoch, n_ta_tx, n_all_acks, synced_with_ack, sync_missed, period_skew, hopcount);
+    printf("P %u:%u %u %u:%u %u %u %d:%ld\n", epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, ack_skew_err, end_of_s_time);
+  }
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-    static int i;
-    printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_rx, noise, scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
-    for (i=0; i<n_rec_rx; i++) {
-      printf("T %u:%u %u %u %u %u %u %u %u\n", epoch, i,
+  static int i;
+  printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_rx, noise, scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
+  for (i=0; i<n_rec_rx; i++) {
+    printf("T %u:%u %u %u %u %u %u %u %u\n", epoch, i,
         recv_t[i].type,
         recv_t[i].src,
         recv_t[i].seqn,
@@ -1037,45 +996,41 @@ PROCESS_THREAD(crystal_print_stats_process, ev, data)
         recv_t[i].rx_count,
         recv_t[i].length,
         recv_t[i].err_code);
-    }
-    for (i=0; i<n_rec_tx; i++) {
-      printf("Q %u:%u %u %u %u %u\n", epoch, i,
+  }
+  for (i=0; i<n_rec_tx; i++) {
+    printf("Q %u:%u %u %u %u %u\n", epoch, i,
         send_t[i].seqn,
         send_t[i].n_ta,
         send_t[i].rx_count,
         send_t[i].acked);
-    }
-    n_rec_rx = 0;
-    n_rec_tx = 0;
+  }
+  n_rec_rx = 0;
+  n_rec_tx = 0;
 #endif
 #endif
-    //app_print_logs(); // deprecated! use the epoch end callback instead
-    /*printf("D %u:%u %lu %u:%u %lu %u\n", epoch,
-      glossy_S.T_slot_h, glossy_S.T_slot_h_sum, glossy_S.win_cnt,
-      glossy_A.T_slot_h, glossy_A.T_slot_h_sum, glossy_A.win_cnt
-      );*/
+  /*printf("D %u:%u %lu %u:%u %lu %u\n", epoch,
+    glossy_S.T_slot_h, glossy_S.T_slot_h_sum, glossy_S.win_cnt,
+    glossy_A.T_slot_h, glossy_A.T_slot_h_sum, glossy_A.win_cnt
+    );*/
 
 #if ENERGEST_CONF_ON && CRYSTAL_LOGLEVEL
-    if (!first_time) {
-      // Compute average radio-on time.
-      avg_radio_on = (energest_type_time(ENERGEST_TYPE_LISTEN) + energest_type_time(ENERGEST_TYPE_TRANSMIT))
-        * 1e6 /
-        (energest_type_time(ENERGEST_TYPE_CPU) + energest_type_time(ENERGEST_TYPE_LPM));
-      // Print information about average radio-on time per second.
-      printf("E %u:%lu.%03lu:%u %u %u\n", epoch,
-          avg_radio_on / 1000, avg_radio_on % 1000, ton_S, ton_T, ton_A);
-      printf("F %u:%u %u %u:%u %u %u\n", epoch,
-          tf_S, tf_T, tf_A, n_short_S, n_short_T, n_short_A);
-    }
-    // Initialize Energest values.
-    energest_init();
-    first_time = 0;
-#endif /* ENERGEST_CONF_ON */
+  if (!first_time) {
+    // Compute average radio-on time.
+    avg_radio_on = (energest_type_time(ENERGEST_TYPE_LISTEN) + energest_type_time(ENERGEST_TYPE_TRANSMIT))
+      * 1e6 /
+      (energest_type_time(ENERGEST_TYPE_CPU) + energest_type_time(ENERGEST_TYPE_LPM));
+    // Print information about average radio-on time per second.
+    printf("E %u:%lu.%03lu:%u %u %u\n", epoch,
+        avg_radio_on / 1000, avg_radio_on % 1000, ton_S, ton_T, ton_A);
+    printf("F %u:%u %u %u:%u %u %u\n", epoch,
+        tf_S, tf_T, tf_A, n_short_S, n_short_T, n_short_A);
   }
-  PROCESS_END();
+  // Initialize Energest values.
+  energest_init();
+  first_time = 0;
+#endif /* ENERGEST_CONF_ON */
 }
 
-#endif //CRYSTAL_LOGGING
 
 crystal_config_t crystal_get_config() {
   return conf;

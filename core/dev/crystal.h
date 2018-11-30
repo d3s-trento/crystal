@@ -70,12 +70,14 @@ void app_post_A(int received, uint8_t* payload);
  * part of the epoch */
 void app_epoch_end();
 
-/* An interrupt-context callback that pings the app periodically during 
- * inactive portion of each epoch (deprecated) */
-void app_ping();
+/* An interrupt-context callback that pings the app 
+ * CRYSTAL_CONF_APP_PRE_EPOCH_CB_TIME before a new epoch starts */
+void app_pre_epoch();
 
-/* A process-context callback to print application logs (deprecated) */
-void app_print_logs();
+/* Print logs for the current epoch.
+ * If needed, the application should call this function from its process
+ * every epoch.*/
+void crystal_print_epoch_logs();
 
 
 /* == Crystal application interface (requests) ===============================*/

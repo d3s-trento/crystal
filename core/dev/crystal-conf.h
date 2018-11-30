@@ -94,13 +94,6 @@
 #define CRYSTAL_SYNC_ACKS 1
 #endif
 
-#ifdef CRYSTAL_CONF_LOGGING
-#define CRYSTAL_LOGGING CRYSTAL_CONF_LOGGING
-#else
-#define CRYSTAL_LOGGING 1
-#endif
-
-
 #define CRYSTAL_LOGS_NONE 0
 #define CRYSTAL_LOGS_EPOCH_STATS 1
 #define CRYSTAL_LOGS_ALL 2
@@ -139,6 +132,20 @@
 #define CRYSTAL_PKTBUF_LEN CRYSTAL_CONF_PKTBUF_LEN
 #else
 #define CRYSTAL_PKTBUF_LEN 128
+#endif
+
+/* The time reserved for the application at the end of Crystal epoch */
+#ifdef CRYSTAL_CONF_TIME_FOR_APP
+#define CRYSTAL_TIME_FOR_APP CRYSTAL_CONF_TIME_FOR_APP
+#else
+#define CRYSTAL_TIME_FOR_APP 0
+#endif
+
+/* Crystal will notify the application this time before an epoch starts */
+#ifdef CRYSTAL_CONF_APP_PRE_EPOCH_CB_TIME
+#define CRYSTAL_APP_PRE_EPOCH_CB_TIME CRYSTAL_CONF_APP_PRE_EPOCH_CB_TIME
+#else
+#define CRYSTAL_APP_PRE_EPOCH_CB_TIME 328 // ~ 10 ms 
 #endif
 
 
