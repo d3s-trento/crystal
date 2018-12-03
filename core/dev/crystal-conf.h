@@ -128,10 +128,11 @@
 #define CRYSTAL_BSTRAP_CHHOPPING BSTRAP_nohop
 #endif
 
+/* The maximum Crystal packet size */
 #ifdef CRYSTAL_CONF_PKTBUF_LEN
 #define CRYSTAL_PKTBUF_LEN CRYSTAL_CONF_PKTBUF_LEN
 #else
-#define CRYSTAL_PKTBUF_LEN 128
+#define CRYSTAL_PKTBUF_LEN 80
 #endif
 
 /* The time reserved for the application at the end of Crystal epoch */
