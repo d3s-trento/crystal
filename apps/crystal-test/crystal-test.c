@@ -18,30 +18,7 @@ static app_a_payload a_payload;
 #define MS_TO_TICKS(v) ((uint32_t)RTIMER_SECOND*(v)/1000)
 
 /* Crystal configuration structure */
-static crystal_config_t conf = {
-  .period  = MS_TO_TICKS(1500),
-  .is_sink = 0, /* set below in the initialisation code based on the node ID */
-
-  .ntx_S   = 3,
-  .w_S     = MS_TO_TICKS(12),
-  .plds_S  = sizeof(app_s_payload),
-  .ntx_T   = 3,
-  .w_T     = MS_TO_TICKS(8),
-  .plds_T  = sizeof(app_t_payload),
-  .ntx_A   = 3,
-  .w_A     = MS_TO_TICKS(8),
-  .plds_A  = sizeof(app_a_payload),
-
-  .r       = 2,
-  .y       = 2,
-  .z       = 4,
-  .x       = 6,
-  .xa      = 6,
-  
-  .ch_whitelist  = 0xFFFF, // NA
-  .enc_enable    = 0,      // NA
-  .scan_duration = 0xFF,   // NA
-};
+static crystal_config_t conf;
 
 PROCESS(crystal_test, "Crystal test");
 
@@ -218,6 +195,10 @@ PROCESS_THREAD(crystal_test, ev, data) {
 
   printf("I am alive! Node ID: %d, EUI-64: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n", node_id, ds2411_id[0],ds2411_id[1],ds2411_id[2],ds2411_id[3],ds2411_id[4],ds2411_id[5],ds2411_id[6],ds2411_id[7]);
 
+  conf = crystal_get_config();
+  conf.plds_S  = sizeof(app_s_payload);
+  conf.plds_T  = sizeof(app_t_payload);
+  conf.plds_A  = sizeof(app_a_payload);
   conf.is_sink = is_sink;
 
   PRINT_CRYSTAL_CONFIG(conf);
@@ -228,6 +209,7 @@ PROCESS_THREAD(crystal_test, ev, data) {
     PROCESS_WAIT_EVENT();
     if (ev==EPOCH_END_EV) {
       int i;
+      crystal_print_epoch_logs();
       if (is_sink) {
         for (i=0; i<n_pkt_recv; i++) {
           printf("B %u:%u %u %u\n", crystal_info.epoch, 
@@ -255,7 +237,5 @@ PROCESS_THREAD(crystal_test, ev, data) {
 
 
 
-// Deprecated callbacks
-void app_ping() {}
-void app_print_logs() {}
+void app_pre_epoch() {}
 

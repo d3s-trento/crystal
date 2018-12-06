@@ -116,8 +116,10 @@ def mk_env(power, channel, sink, num_senders, n_empty, cca):
     ]
 
     if logging:
-        cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_ALL"]
-        #cflags += ["-DCRYSTAL_CONF_LOGGING=1", "-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_EPOCH_STATS"]
+        cflags += ["-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_ALL"]
+        cflags += ["-DCRYSTAL_CONF_TIME_FOR_APP=\(RTIMER_SECOND/3\)"]
+        #cflags += ["-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_EPOCH_STATS"]
+        #cflags += ["-DCRYSTAL_CONF_TIME_FOR_APP=(RTIMER_SECOND/10)"]
     else:
         cflags += ["-DDISABLE_UART=1"]
 

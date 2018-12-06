@@ -1,7 +1,7 @@
 CONTIKI_PROJECT = crystal-test
 all: $(CONTIKI_PROJECT)
 
-#CONTIKI_SOURCEFILES += 
+#DEFINES += PROJECT_CONF_H=\"project-conf.h\"
 
 
 CONTIKI = ../..
