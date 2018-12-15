@@ -10,12 +10,12 @@ CRYSTAL_BAD_DATA = 1
 CRYSTAL_BAD_CRC = 2
 CRYSTAL_HIGH_NOISE = 3
 CRYSTAL_SILENCE = 4
+CRYSTAL_TX = 5
 
 
 ssum = read.table("send_summary.log", header=T, colClasses=c("numeric"))
 rsum = read.table("recv_summary.log", header=T, colClasses=c("numeric"))
-recv = read.table("recv.log", header=T, colClasses=c("numeric"))
-send = read.table("send.log", header=T, colClasses=c("numeric"))
+ta_log = read.table("ta.log", header=T, colClasses=c("numeric"))
 asend = read.table("app_send.log", header=T, colClasses=c("numeric"))
 energy = read.table("energy.log", header=T, colClasses=c("numeric"))
 energy_tf = read.table("energy_tf.log", header=T, colClasses=c("numeric"))
@@ -31,9 +31,6 @@ if ("payload" %in% names(params)) {
     payload_length = params$payload
 }
 message("Payload length: ", payload_length)
-
-CRYSTAL_DATA_LEN = 3 + payload_length
-
 
 message("Starting epoch per node")
 start_epoch = setNames(aggregate(epoch ~ dst, rsum, FUN=min), c("node", "epoch"))
@@ -57,10 +54,8 @@ n_epochs = max_epoch - min_epoch + 1
 message(n_epochs, " epochs: [", min_epoch, ", ", max_epoch, "]")
 
 
-e = recv$epoch
-recv = recv[e>=min_epoch & e<=max_epoch,]
-e = send$epoch
-send = send[e>=min_epoch & e<=max_epoch,]
+e = ta_log$epoch
+ta_log = ta_log[e>=min_epoch & e<=max_epoch,]
 e = asend$epoch
 asend = asend[e>=min_epoch & e<=max_epoch,]
 e = ssum$epoch
@@ -79,12 +74,15 @@ heard_from = unique(rsum$dst)
 message("Participating nodes: ", length(heard_from))
 print(sort(heard_from))
 
+send = ta_log[ta_log$status==CRYSTAL_TX,]
+recv = ta_log[ta_log$status!=CRYSTAL_TX,]
+
 sent_anything = unique(send$src)
 message("Nodes that logged sending something: ", length(sent_anything))
 print(sort(sent_anything))
 
-not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$length != CRYSTAL_DATA_LEN) | (recv$err_code != 0)
-wrong_packets = not_packets & (recv$err_code %in% c(CRYSTAL_BAD_DATA))
+not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$status != 0)
+wrong_packets = not_packets & (recv$status %in% c(CRYSTAL_BAD_DATA))
 
 recv_from = unique(recv[!not_packets, c("src")])
 message("Messages received from the following ", length(recv_from), " nodes")
@@ -97,9 +95,9 @@ lazy_nodes
 message("Packets of wrong types or length received:")
 recv[wrong_packets,]
 
-message("Num packets with bad CRC: ", sum(recv$err_code == CRYSTAL_BAD_CRC))
+message("Num packets with bad CRC: ", sum(recv$status == CRYSTAL_BAD_CRC))
 
-no_packet_ts = recv[recv$dst==SINK & not_packets & (recv$err_code %in% c(CRYSTAL_HIGH_NOISE, CRYSTAL_SILENCE)), c("epoch", "dst", "n_ta", "length", "err_code", "time")]
+no_packet_ts = recv[recv$dst==SINK & not_packets & (recv$status %in% c(CRYSTAL_HIGH_NOISE, CRYSTAL_SILENCE)), c("epoch", "dst", "n_ta", "length", "status", "time")]
 write.table(no_packet_ts, "empty_t.log", row.names=F)
 
 recv=recv[!not_packets,]
@@ -219,8 +217,6 @@ if (is.na(conc_senders) | conc_senders > 0) {
     message("Epochs with incomplete receive: ", length(incompl_epochs))
     print(incompl_epochs)
 
-    #message("Distribution of tx attempts required")
-    #print(setNames(aggregate(epoch ~ real_send$n_tx, real_send, FUN=length), c("n_tx", "cases")))
     message("Distribution of the number of packets per epoch")
     nsndr_hist = setNames(aggregate(epoch ~ deliv$n_pkt, deliv, FUN=length), c("n_pkt", "cases"))
     print(nsndr_hist)
@@ -287,8 +283,9 @@ en_short_t = en[en$n_short_t != 0,]
 en_short_a = en[en$n_short_a != 0,]
 
 en_short_t = within(en_short_t, tf_t <- tf_t/n_short_t)
+en_short_t = within(en_short_t, ratio_short_t <- n_short_t/n_ta)
 en_short_a = within(en_short_a, tf_a <- tf_a/n_short_a)
-en_short_a = within(en_short_a, n_compl_recv_a <- n_short_a/n_ta)
+en_short_a = within(en_short_a, ratio_short_a <- n_short_a/n_ta)
 
 tf_s_pernode = setNames(aggregate(tf_s ~ en_short_s$node, en_short_s, mean), c("node", "tf_s"))
 tf_t_pernode = setNames(tryCatch(aggregate(tf_t ~ en_short_t$node, en_short_t, mean), error=function(e) data.frame(matrix(vector(), 0, 2))), c("node", "tf_t"))
@@ -297,57 +294,62 @@ tf_a_pernode = setNames(tryCatch(aggregate(tf_a ~ en_short_a$node, en_short_a, m
 
 pdf("tf.pdf", width=12, height=8)
 
-short_s_pernode = setNames(aggregate(s_rx_cnt>=params$n_tx_s ~ rsum$dst, rsum, sum), c("node", "n_short_s"))
+short_s_pernode = setNames(aggregate(en_short_s$n_short_s ~ en_short_s$node, en_short_s, sum), c("node", "n_short_s"))
 n_recv_pernode =  setNames(aggregate(s_rx_cnt>0 ~ rsum$dst, rsum, sum), c("node", "n_recv_s"))
 short_s_pernode = merge(short_s_pernode, n_recv_pernode)
-short_s_pernode = within(short_s_pernode, n_compl_recv_s <- n_short_s/n_recv_s)
-short_s_pernode[!is.finite(short_s_pernode$n_compl_recv_s), c("n_compl_recv_s")] <- NA 
+short_s_pernode = within(short_s_pernode, ratio_short_s <- n_short_s/n_recv_s)
+short_s_pernode[!is.finite(short_s_pernode$ratio_short_s), c("ratio_short_s")] <- NA 
 
 ggplot(data=en_short_s, aes(x=as.factor(node), y=tf_s)) + 
     geom_boxplot(outlier.colour="gray30", outlier.size=1) +
     #xlim(0, max_cca_busy) +    
     ggtitle("tf_s") +
     theme_bw()
-ggplot(data=short_s_pernode, aes(x=as.factor(node), y=n_compl_recv_s)) + 
+ggplot(data=rsum, aes(x=as.factor(dst), y=s_rx_cnt)) + 
+    geom_boxplot(outlier.colour="gray30", outlier.size=1) +
+    #xlim(0, max_cca_busy) +    
+    ggtitle("S rx count") +
+    theme_bw()
+ggplot(data=short_s_pernode, aes(x=as.factor(node), y=ratio_short_s)) + 
     geom_point() +
-    ggtitle("Ratio of S phases with complete receive") +
+    ggtitle("Ratio of short S slots") +
     theme_bw()
 
 if (conc_senders>0) {
-    short_t_pernode = setNames(aggregate(rx_cnt>=params$n_tx_t ~ recv$dst, recv, sum), c("node", "n_short_t"))
-    n_recv_pernode =  setNames(aggregate(rx_cnt>0 ~ recv$dst, recv, sum), c("node", "n_recv_t"))
-    short_t_pernode = merge(short_t_pernode, n_recv_pernode)
-    short_t_pernode = within(short_t_pernode, n_compl_recv_t <- n_short_t/n_recv_t)
-    short_t_pernode[!is.finite(short_t_pernode$n_compl_recv_t), c("n_compl_recv_t")] <- NA 
-
     p = ggplot(data=en_short_t, aes(x=as.factor(node), y=tf_t)) + 
     geom_boxplot(outlier.colour="gray30", outlier.size=1) +
     ggtitle("tf_t (epoch averages)") +
     theme_bw()
     print(p)
-    p = ggplot(data=short_t_pernode, aes(x=as.factor(node), y=n_compl_recv_t)) + 
-    geom_point() +
-    ggtitle("Ratio of T phases with complete receive") +
+ggplot(data=recv, aes(x=as.factor(dst), y=t_rx_cnt)) + 
+    geom_boxplot(outlier.colour="gray30", outlier.size=1) +
+    #xlim(0, max_cca_busy) +    
+    ggtitle("T rx count") +
     theme_bw()
-    print(p)
+#ggplot(data=en_short_a, aes(x=as.factor(node), y=ratio_short_t)) + 
+#    geom_boxplot(outlier.colour="gray30", outlier.size=1) +
+#    ggtitle("Ratio of short T slots (epoch averages)") +
+#    theme_bw()
 }
 
 ggplot(data=en_short_a, aes(x=as.factor(node), y=tf_a)) + 
     geom_boxplot(outlier.colour="gray30", outlier.size=1) +
     ggtitle("tf_a (epoch averages)") +
     theme_bw()
-ggplot(data=en_short_a, aes(x=as.factor(node), y=n_compl_recv_a)) + 
+ggplot(data=ta_log, aes(x=as.factor(dst), y=a_rx_cnt)) + 
     geom_boxplot(outlier.colour="gray30", outlier.size=1) +
-    ggtitle("Ratio of complete A slots (epoch averages)") +
+    #xlim(0, max_cca_busy) +    
+    ggtitle("A rx count") +
+    theme_bw()
+ggplot(data=en_short_a, aes(x=as.factor(node), y=ratio_short_a)) + 
+    geom_boxplot(outlier.colour="gray30", outlier.size=1) +
+    ggtitle("Ratio of short A slots (epoch averages)") +
     theme_bw()
 dev.off()
 
 energy_pernode = merge(energy_pernode, tf_s_pernode, all.x=T)
 energy_pernode = merge(energy_pernode, tf_a_pernode, all.x=T)
 energy_pernode = merge(energy_pernode, tf_t_pernode, all.x=T)
-
-t_compl_recv = sum(recv$rx_cnt>=params$n_tx_t)/dim(recv)[1]
-message("T complete receives: ", t_compl_recv)
 
 message("Radio ON per node")
 energy_pernode
@@ -378,12 +380,6 @@ pernode_pdr = within(
                      pdr<-n_recv/n_sent)
 
 pernode = merge(pernode, pernode_pdr, all.x=T)
-
-# average number of tx attempts
-
-pernode_ntx = setNames(tryCatch(aggregate(n_tx ~ real_send$src, real_send, FUN=sum), error = function(e) data.frame(matrix(vector(), 0, 2))), c("node", "n_tx_tries"))
-
-pernode = merge(pernode, pernode_ntx, all.x=T)
 
 # counting numbers of lost and received beacons
 
@@ -588,7 +584,6 @@ stats = data.frame(pdr=real_PDR, oldpdr=PDR,
                    tfa_min = min(energy_pernode$tf_a, na.rm=T), tfa_mean = mean(energy_pernode$tf_a, na.rm=T), tfa_max = max(energy_pernode$tf_a, na.rm=T),
                    noise_mean=noise_mean, noise_max=noise_max,
                    s_compl_recv = s_compl_recv,
-                   t_compl_recv = t_compl_recv,
                    n_lazy_nodes = length(lazy_nodes),
                    rxta_mean = rxta_mean, rxta_max = rxta_max
                    )

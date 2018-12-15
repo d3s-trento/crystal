@@ -75,6 +75,8 @@ static crystal_config_t conf = {
 
 crystal_info_t crystal_info;          // public read-only status information about Crystal
 
+crystal_app_log_t crystal_app_log;
+
 static uint8_t* payload;                     // application payload pointer for the current slot
 
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy structure to be used in different phases
@@ -124,20 +126,21 @@ static uint32_t end_of_s_time; // timestamp of the end of the S phase, relative 
 static uint16_t ack_skew_err;  // "wrong" ACK skew
 static uint16_t hopcount;
 static uint16_t rx_count_S, tx_count_S;  // tx and rx counters for S phase as reported by Glossy
+static uint16_t rx_count_T;
+static uint16_t rx_count_A;
 static uint16_t ton_S, ton_T, ton_A;     // actual duration of the phases
 static uint16_t tf_S, tf_T, tf_A;        // actual duration of the phases when all N packets are received
 static uint16_t n_short_S, n_short_T, n_short_A; // number of "complete" S, T and A phases (those counted in tf_S, tf_T and tf_A)
 static uint16_t cca_busy_cnt;
 
 // info about current TA
-static uint16_t log_recv_seqn;
-static uint16_t log_recv_src;
 static uint16_t log_recv_type;
 static uint16_t log_recv_length;
-static uint16_t log_recv_err;
+static uint16_t log_ta_status;
 
-static uint16_t log_send_seqn;
-static uint16_t log_send_acked;
+static int log_noise;
+static uint16_t noise_scan_channel;
+static inline void measure_noise();
 
 #define TA_DURATION (conf.w_T+conf.w_A+2*CRYSTAL_INTER_PHASE_GAP)
 
@@ -166,71 +169,52 @@ static uint16_t log_send_acked;
 
 // info about a data packet received during T phase
 //
-// TODO: convert it to a common TA info
 // TODO: move the app-level logging to the app itself
 // TODO: add T_on here, remove the related statistics from the code
 // TODO: add tx_count
-struct recv_info {
+struct ta_info {
   uint8_t n_ta;
-  uint8_t src; // app
-  uint16_t seqn; // app
+  uint8_t src;
+  uint16_t seqn;
   uint8_t type;
-  uint8_t rx_count;
+  uint8_t t_rx_count;
+  uint8_t a_rx_count;
   uint8_t length;
-  uint8_t err_code;
+  uint8_t status;
+  uint8_t acked;
 };
-
-// info about a data packet sent during T phase
-struct send_info {
-  uint8_t n_ta;
-  uint16_t seqn; // app
-  uint8_t rx_count;
-  uint8_t acked; // app
-};
-
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-#define MAX_LOG_TAS 30 // XXX fix this! If set larger, there's no time to print everything at the end of the epoch
-static struct recv_info recv_t[MAX_LOG_TAS];
-static int n_rec_rx; // number of receive records in the array
-
-static struct send_info send_t[MAX_LOG_TAS];
-static int n_rec_tx; // number of send records in the array
+#define MAX_LOG_TAS 50
+static struct ta_info ta_log[MAX_LOG_TAS];
+static int n_rec_ta; // number of receive records in the array
 #endif //CRYSTAL_LOGLEVEL
 
 static inline void init_ta_log_vars() {
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-  log_recv_type = 0; log_recv_length = 0; log_recv_err = 0;
+  log_recv_type = 0; log_recv_length = 0; log_ta_status = 0;
 
   // the following are set by the application code
-  log_recv_seqn = 0; log_recv_src = 0;
-  log_send_seqn = 0; log_send_acked = 0;
+  crystal_app_log.send_seqn = 0;
+  crystal_app_log.recv_seqn = 0;
+  crystal_app_log.recv_src  = 0;
+  crystal_app_log.acked     = 0;
 #endif //CRYSTAL_LOGLEVEL
 }
 
-static inline void log_ta_rx() {
+static inline void log_ta(int tx) {
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-  if (n_rec_rx < MAX_LOG_TAS) {
-    recv_t[n_rec_rx].n_ta = n_ta;
-    recv_t[n_rec_rx].src = log_recv_src;
-    recv_t[n_rec_rx].seqn = log_recv_seqn;
-    recv_t[n_rec_rx].type = log_recv_type;
-    recv_t[n_rec_rx].rx_count = get_rx_cnt();
-    recv_t[n_rec_rx].length = log_recv_length;
-    recv_t[n_rec_rx].err_code = log_recv_err;
-    n_rec_rx ++;
-  }
-#endif //CRYSTAL_LOGLEVEL
-}
-
-static inline void log_ta_tx() {
-#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
-  if (n_rec_tx < MAX_LOG_TAS) {
-    send_t[n_rec_tx].n_ta = n_ta;
-    send_t[n_rec_tx].seqn = log_send_seqn;
-    send_t[n_rec_tx].rx_count = get_rx_cnt();
-    send_t[n_rec_tx].acked = log_send_acked;
-    n_rec_tx ++;
+  if (n_rec_ta < MAX_LOG_TAS) {
+    ta_log[n_rec_ta].n_ta = n_ta;
+    ta_log[n_rec_ta].status = tx?CRYSTAL_TX:log_ta_status;
+    ta_log[n_rec_ta].src = tx?node_id:crystal_app_log.recv_src;
+    ta_log[n_rec_ta].seqn = tx?crystal_app_log.send_seqn:crystal_app_log.recv_seqn;
+    ta_log[n_rec_ta].type = log_recv_type;
+    ta_log[n_rec_ta].t_rx_count = rx_count_T;
+    ta_log[n_rec_ta].a_rx_count = rx_count_A;
+    ta_log[n_rec_ta].length = log_recv_length;
+    ta_log[n_rec_ta].acked = crystal_app_log.acked;
+    n_rec_ta ++;
   }
 #endif //CRYSTAL_LOGLEVEL
 }
@@ -418,24 +402,25 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
       correct_packet = 0;
       cca_busy_cnt = get_cca_busy_cnt();
-      if (get_rx_cnt()) { // received data
+      rx_count_T = get_rx_cnt();
+      if (rx_count_T) { // received data
         n_empty_ts = 0;
         n_high_noise = 0;
         log_recv_type = get_app_header();
         log_recv_length = get_data_len();
         correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
-        log_recv_err = correct_packet?0:CRYSTAL_BAD_DATA;
+        log_ta_status = correct_packet?CRYSTAL_RECV_OK:CRYSTAL_BAD_DATA;
       }
       else if (is_corrupted()) {
         n_empty_ts = 0;
         n_high_noise = 0;
-        log_recv_err = CRYSTAL_BAD_CRC;
+        log_ta_status = CRYSTAL_BAD_CRC;
       }
       else if (conf.x > 0 && cca_busy_cnt > CRYSTAL_CCA_COUNTER_THRESHOLD) {
         //n_empty_ts = 0; // should we reset it, it's a good question
         n_high_noise ++;
         log_recv_length = cca_busy_cnt;
-        log_recv_err = CRYSTAL_HIGH_NOISE;
+        log_ta_status = CRYSTAL_HIGH_NOISE;
       }
       else {
         // just silence
@@ -443,11 +428,11 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
         n_empty_ts ++;
         // logging for debugging
         log_recv_length = cca_busy_cnt;
-        log_recv_err = CRYSTAL_SILENCE;
+        log_ta_status = CRYSTAL_SILENCE;
       }
 
       payload = app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
-      log_ta_rx();
+      log_ta(0);
       BZERO_BUF();
       // -- Phase T end (root) --------------------------------------------------------- T end (root) ---
       sleep_order = 
@@ -761,24 +746,24 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       glossy_stop();
       UPDATE_SLOT_STATS(T, i_tx);
 
-      if (!i_tx) { 
-        if (get_rx_cnt()) { // received data
+      rx_count_T = get_rx_cnt();
+      if (!i_tx) {
+        if (rx_count_T) { // received data
           log_recv_type = get_app_header();
           log_recv_length = get_data_len();
           correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
-          log_recv_err = correct_packet?0:CRYSTAL_BAD_DATA;
+          log_ta_status = correct_packet?CRYSTAL_RECV_OK:CRYSTAL_BAD_DATA;
           n_empty_ts = 0;
         }
         else if (is_corrupted()) {
-          log_recv_err = CRYSTAL_BAD_CRC;
+          log_ta_status = CRYSTAL_BAD_CRC;
           //n_empty_ts = 0; // keep it as it is to give another chance but not too many chances
         } 
         else { // TODO: should we check for the high noise also here?
-          log_recv_err = CRYSTAL_SILENCE;
+          log_ta_status = CRYSTAL_SILENCE;
           n_empty_ts ++;
         }
         cca_busy_cnt = get_cca_busy_cnt();
-        log_ta_rx();
       }
 
       app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
@@ -805,7 +790,8 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       glossy_stop();
       UPDATE_SLOT_STATS(A, 0);
 
-      if (get_rx_cnt()) {
+      rx_count_A = get_rx_cnt();
+      if (rx_count_A) {
         if (get_data_len() == CRYSTAL_A_LEN 
             && get_app_header() == CRYSTAL_TYPE_ACK 
             && CRYSTAL_ACK_CMD_CORRECT(buf.ack_hdr)) {
@@ -872,8 +858,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       app_post_A(correct_packet, buf.raw + sizeof(crystal_ack_hdr_t));
 
-      if (i_tx)
-        log_ta_tx();
+      log_ta(i_tx);
 
       BZERO_BUF();
       // -- Phase A end (non-root) ------------------------------------------------- A end (non-root) ---
@@ -930,6 +915,17 @@ static void tune_AGC_radio() {
   FASTSPI_SETREG(CC2420_AGCTST1, (reg_agctst + (1 << 8) + (1 << 13)));
 }
 
+static inline void measure_noise() {
+#if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
+  noise_scan_channel = channel_array[epoch % get_num_channels()];
+  cc2420_set_channel(noise_scan_channel);
+  cc2420_oscon();
+  log_noise = cc2420_rssi();
+  cc2420_oscoff();
+#endif
+}
+
+
 bool crystal_start(crystal_config_t* conf_)
 {
   // check the config
@@ -964,20 +960,12 @@ bool crystal_start(crystal_config_t* conf_)
 
 void crystal_stop() {/* TODO */}
 
-crystal_print_epoch_logs() {
-  int noise;
+void crystal_print_epoch_logs() {
   static int first_time = 1;
   unsigned long avg_radio_on;
-  uint16_t scan_channel;
 
 #if CRYSTAL_LOGLEVEL
 
-  /* Noise scanning. TODO move to the Crystal timer handler */
-  //scan_channel = channel_array[epoch % get_num_channels()];
-  //cc2420_set_channel(scan_channel);
-  //cc2420_oscon();
-  //noise = cc2420_rssi();
-  //cc2420_oscoff();
 
   if (!conf.is_sink) {
     printf("S %u:%u %u %u:%u %d %u\n", epoch, n_ta_tx, n_all_acks, synced_with_ack, sync_missed, period_skew, hopcount);
@@ -986,26 +974,24 @@ crystal_print_epoch_logs() {
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
   static int i;
-  printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_rx, noise, scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
-  for (i=0; i<n_rec_rx; i++) {
-    printf("T %u:%u %u %u %u %u %u %u %u\n", epoch, i,
-        recv_t[i].type,
-        recv_t[i].src,
-        recv_t[i].seqn,
-        recv_t[i].n_ta,
-        recv_t[i].rx_count,
-        recv_t[i].length,
-        recv_t[i].err_code);
+  printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_ta, log_noise, noise_scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
+  for (i=0; i<n_rec_ta; i++) {
+    printf("T %u:%u %u:%u %u %u %u:%u %u %u\n", epoch,
+        ta_log[i].n_ta,
+        ta_log[i].status,
+        
+        ta_log[i].src,
+        ta_log[i].seqn,
+        ta_log[i].type,
+        ta_log[i].length,
+
+        ta_log[i].t_rx_count,
+        ta_log[i].a_rx_count,
+        ta_log[i].acked
+        
+        );
   }
-  for (i=0; i<n_rec_tx; i++) {
-    printf("Q %u:%u %u %u %u %u\n", epoch, i,
-        send_t[i].seqn,
-        send_t[i].n_ta,
-        send_t[i].rx_count,
-        send_t[i].acked);
-  }
-  n_rec_rx = 0;
-  n_rec_tx = 0;
+  n_rec_ta = 0;
 #endif
 #endif
   /*printf("D %u:%u %lu %u:%u %lu %u\n", epoch,

@@ -99,8 +99,19 @@ typedef struct {
   uint8_t hops;
 } crystal_info_t;
 
+typedef struct {
+  uint16_t send_seqn;
+  uint16_t recv_seqn;
+  uint16_t recv_src;
+  uint8_t  acked;
+  
+} crystal_app_log_t;
+
 /* A variable holding the current state of Crystal */
 extern crystal_info_t crystal_info;
+
+/* App-level information in Crystal logs */
+extern crystal_app_log_t crystal_app_log;
 
 
 #define PRINT_CRYSTAL_CONFIG(conf) do {\

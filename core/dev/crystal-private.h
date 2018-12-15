@@ -64,10 +64,12 @@
 #define APP_PING_INTERVAL (RTIMER_SECOND / 31) // 32 ms
 
 
+#define CRYSTAL_RECV_OK    0
 #define CRYSTAL_BAD_DATA   1
 #define CRYSTAL_BAD_CRC    2
 #define CRYSTAL_HIGH_NOISE 3
 #define CRYSTAL_SILENCE    4
+#define CRYSTAL_TX         5
 
 
 typedef struct {

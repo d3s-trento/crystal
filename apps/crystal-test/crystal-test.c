@@ -100,11 +100,10 @@ void app_post_S(int received, uint8_t* payload) {
 
 // Pre-T phase Crystal callback
 uint8_t* app_pre_T() {
-  //log_send_acked = 0;
   if (app_have_packet) {
     t_payload.seqn = app_seqn;
     t_payload.src  = node_id;
-    //log_send_seqn  = app_seqn;  // for logging
+    crystal_app_log.send_seqn  = app_seqn;
     return (uint8_t*)&t_payload;
   }
   return NULL;
@@ -115,8 +114,8 @@ uint8_t* app_between_TA(int received, uint8_t* payload) {
   if (received) {
     t_payload = *(app_t_payload*)payload;
 
-    //log_recv_src  = t_payload.src;
-    //log_recv_seqn = t_payload.seqn;
+    crystal_app_log.recv_src  = t_payload.src;
+    crystal_app_log.recv_seqn = t_payload.seqn;
   }
   if (received && is_sink) {
       // fill in the ack payload
@@ -141,12 +140,12 @@ uint8_t* app_between_TA(int received, uint8_t* payload) {
 // Post-A phase Crystal callback
 void app_post_A(int received, uint8_t* payload) {
   // non-sink: if acked us, stop sending data
-  //log_send_acked = 0;
+  crystal_app_log.acked = 0;
   if (app_have_packet && received) {
     a_payload = *(app_a_payload*)payload;
     
     if ((a_payload.src == node_id) && (a_payload.seqn == app_seqn)) {
-      //log_send_acked = 1;
+      crystal_app_log.acked = 1;
       app_mark_acked();
       if (n_pkt_sent < PACKETS_PER_EPOCH) {
         app_new_packet();
