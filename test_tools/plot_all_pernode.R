@@ -7,7 +7,7 @@ library(ggrepel)
 
 metrics_point= c("pdr", "s_pdr", "a_pdr", "T_SR", "duty")
 metrics_point= c(metrics_point, "ton_s", "ton_a", "ton_t") #, "ton_total")
-metrics_point= c(metrics_point, "tf_s", "tf_a", "tf_t", "n_tx_tries_mean", "hops")
+metrics_point= c(metrics_point, "tf_s", "tf_a", "tf_t", "hops")
 
 
 f_stats = "pernode.txt"
@@ -22,7 +22,6 @@ if (file.exists(f_t_stats)) {
 
 
 data = within(data, duty <- ontime/1000)
-data = within(data, n_tx_tries_mean <- n_tx_tries/n_sent)
 
 title = ""
 update_geom_defaults("point", list(size = 1))

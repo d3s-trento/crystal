@@ -1,37 +1,10 @@
-#ifndef CRYSTAL_H_
-#define CRYSTAL_H_
+#ifndef CRYSTAL_PRIVATE_H
+#define CRYSTAL_PRIVATE_H
 
-#include "glossy.h"
+#include "crystal.h"
 
-#define CRYSTAL_PERIOD     (CRYSTAL_CONF_PERIOD*RTIMER_SECOND)
-
-//#define CRYSTAL_SINK_MAX_EMPTY_TS 2  // sink: max allowed number of empty Ts in a row
-//#define CRYSTAL_MAX_SILENT_TAS 2    // node: max allowed number of empty TA pairs in a row
-//#define CRYSTAL_MAX_SILENT_TAS CRYSTAL_SINK_MAX_EMPTY_TS
-//#define CRYSTAL_MAX_MISSING_ACKS 4    // node: max allowed number of missing acks in a row
-//#define CRYSTAL_SINK_MAX_NOISY_TS 4    // sink: max allowed number of noisy empty Ts in a row
-
-#define CRYSTAL_MAX_NOISY_AS CRYSTAL_SINK_MAX_NOISY_TS // node: max allowed number of noisy empty As
-
-//#define CRYSTAL_PAYLOAD_LENGTH 0      // the length of the application data payload
-
-//#define CCA_THRESHOLD -32
-//#define CCA_COUNTER_THRESHOLD 80
-
-
-//#define CRYSTAL_SYNC_ACKS 1
-
-/**
- * Duration of each Glossy phase.
- */
-#define DUR_S ((uint32_t)RTIMER_SECOND*DUR_S_MS/1000)
-#define DUR_T ((uint32_t)RTIMER_SECOND*DUR_T_MS/1000)
-#define DUR_A ((uint32_t)RTIMER_SECOND*DUR_A_MS/1000)
-
-
-//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms
-#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms
-//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 625) // 1.6 ms
+#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms (for long packets)
+//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms (for short packets)
 
 //#define CRYSTAL_SHORT_GUARD           5
 #define CRYSTAL_SHORT_GUARD           5
@@ -80,33 +53,55 @@
  */
 #define CRYSTAL_SCAN_SLOT_DURATION    (RTIMER_SECOND / 20) //  50 ms
 
-typedef uint8_t crystal_addr_t; // IPSN'18
-//typedef uint16_t crystal_addr_t;
+// Time for the radio crystal oscillator to stabilize
+#define OSC_STAB_TIME (RTIMER_SECOND/500) // 2 ms
 
-//typedef uint8_t crystal_epoch_t; // NOT SUPPORTED !
-typedef uint16_t crystal_epoch_t; // IPSN'18
+#define N_MISSED_FOR_INIT_GUARD 3
+
+#define N_SILENT_EPOCHS_TO_RESET 100
+#define N_SILENT_EPOCHS_TO_STOP_SENDING 3
+
+#define APP_PING_INTERVAL (RTIMER_SECOND / 31) // 32 ms
 
 
-/**
- * Length of data structure.
- */
-#define CRYSTAL_SYNC_LEN sizeof(crystal_sync_struct)
-#define CRYSTAL_DATA_LEN sizeof(crystal_data_struct)
-#define CRYSTAL_ACK_LEN sizeof(crystal_ack_struct)
+#define CRYSTAL_RECV_OK    0
+#define CRYSTAL_BAD_DATA   1
+#define CRYSTAL_BAD_CRC    2
+#define CRYSTAL_HIGH_NOISE 3
+#define CRYSTAL_SILENCE    4
+#define CRYSTAL_TX         5
+
+
+typedef struct {
+  crystal_addr_t src;
+  crystal_epoch_t epoch;
+} 
+__attribute__((packed))
+crystal_sync_hdr_t;
+
+typedef struct {
+} 
+__attribute__((packed))
+crystal_data_hdr_t;
+
+typedef struct {
+  crystal_epoch_t epoch;
+  uint8_t n_ta;
+  uint8_t cmd;
+}
+__attribute__((packed))
+crystal_ack_hdr_t;
 
 #define CRYSTAL_TYPE_SYNC 0x01
 #define CRYSTAL_TYPE_DATA 0x02
 #define CRYSTAL_TYPE_ACK  0x03
 
-#define CRYSTAL_ACK_AWAKE(ack) ((ack)->cmd == 0x11)
-#define CRYSTAL_ACK_SLEEP(ack) ((ack)->cmd == 0x22)
+#define CRYSTAL_ACK_AWAKE(ack) ((ack).cmd == 0x11)
+#define CRYSTAL_ACK_SLEEP(ack) ((ack).cmd == 0x22)
 
-#define CRYSTAL_SET_ACK_AWAKE(ack) ((ack)->cmd = 0x11)
-#define CRYSTAL_SET_ACK_SLEEP(ack) ((ack)->cmd = 0x22)
+#define CRYSTAL_SET_ACK_AWAKE(ack) ((ack).cmd = 0x11)
+#define CRYSTAL_SET_ACK_SLEEP(ack) ((ack).cmd = 0x22)
 
 #define CRYSTAL_ACK_CMD_CORRECT(ack) (CRYSTAL_ACK_AWAKE(ack) || CRYSTAL_ACK_SLEEP(ack))
 
-
-
-
-#endif /* CRYSTAL_H_ */
+#endif //CRYSTAL_PRIVATE_H

@@ -13,12 +13,12 @@ CRYSTAL_BAD_DATA = 1
 CRYSTAL_BAD_CRC = 2
 CRYSTAL_HIGH_NOISE = 3
 CRYSTAL_SILENCE = 4
+CRYSTAL_TX = 5
 
 
 ssum = read.table("send_summary.log", header=T, colClasses=c("numeric"))
 rsum = read.table("recv_summary.log", header=T, colClasses=c("numeric"))
-recv = read.table("recv.log", header=T, colClasses=c("numeric"))
-send = read.table("send.log", header=T, colClasses=c("numeric"))
+ta_log = read.table("ta.log", header=T, colClasses=c("numeric"))
 asend = read.table("app_send.log", header=T, colClasses=c("numeric"))
 energy = read.table("energy.log", header=T, colClasses=c("numeric"))
 energy_tf = read.table("energy_tf.log", header=T, colClasses=c("numeric"))
@@ -35,7 +35,6 @@ if ("payload" %in% names(params)) {
 }
 message("Payload length: ", payload_length)
 
-CRYSTAL_DATA_LEN = 4 + payload_length
 
 
 
@@ -53,10 +52,8 @@ n_epochs = max_epoch - min_epoch + 1
 message(n_epochs, " epochs: [", min_epoch, ", ", max_epoch, "]")
 
 
-e = recv$epoch
-recv = recv[e>=min_epoch & e<=max_epoch,]
-e = send$epoch
-send = send[e>=min_epoch & e<=max_epoch,]
+e = ta_log$epoch
+ta_log = ta_log[e>=min_epoch & e<=max_epoch,]
 e = asend$epoch
 asend = asend[e>=min_epoch & e<=max_epoch,]
 e = ssum$epoch
@@ -75,12 +72,14 @@ heard_from = unique(rsum$dst)
 message("Participating nodes: ", length(heard_from))
 print(sort(heard_from))
 
+send = ta_log[ta_log$status==CRYSTAL_TX,]
+recv = ta_log[ta_log$status!=CRYSTAL_TX,]
+
 sent_anything = unique(send$src)
 message("Nodes that logged sending something: ", length(sent_anything))
 print(sort(sent_anything))
 
-not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$length != CRYSTAL_DATA_LEN) | (recv$err_code != 0)
-wrong_packets = not_packets & (recv$err_code %in% c(CRYSTAL_BAD_DATA, CRYSTAL_BAD_CRC))
+not_packets = (recv$type != CRYSTAL_TYPE_DATA) | (recv$status != 0)
 
 recv_from = unique(recv[!not_packets, c("src")])
 message("Messages received from the following ", length(recv_from), " nodes")
@@ -90,7 +89,7 @@ message("Alive nodes that didn't work")
 lazy_nodes = setdiff(alive, c(heard_from, recv_from, sent_anything, SINK))
 lazy_nodes
 
-message("Packets of wrong types or length received (removing them):")
+message("Packets of wrong types or length received:")
 wrong_recv = recv[not_packets & recv$bad_crc %in% c(CRYSTAL_BAD_DATA, CRYSTAL_BAD_CRC),]
 wrong_recv
 
@@ -260,7 +259,7 @@ en_short_a = en[en$n_short_a != 0,]
 
 en_short_t = within(en_short_t, tf_t <- tf_t/n_short_t)
 en_short_a = within(en_short_a, tf_a <- tf_a/n_short_a)
-en_short_a = within(en_short_a, n_compl_recv_a <- n_short_a/n_ta)
+en_short_a = within(en_short_a, ratio_short_a <- n_short_a/n_ta)
 
 tf_s_pernode = setNames(aggregate(tf_s ~ en_short_s$node, en_short_s, mean), c("node", "tf_s"))
 tf_t_pernode = setNames(tryCatch(aggregate(tf_t ~ en_short_t$node, en_short_t, mean), error=function(e) data.frame(matrix(vector(), 0, 2))), c("node", "tf_t"))
@@ -269,9 +268,6 @@ tf_a_pernode = setNames(tryCatch(aggregate(tf_a ~ en_short_a$node, en_short_a, m
 energy_pernode = merge(energy_pernode, tf_s_pernode, all.x=T)
 energy_pernode = merge(energy_pernode, tf_a_pernode, all.x=T)
 energy_pernode = merge(energy_pernode, tf_t_pernode, all.x=T)
-
-t_compl_recv = sum(recv$rx_cnt>=params$n_tx_t)/dim(recv)[1]
-message("T complete receives: ", t_compl_recv)
 
 message("Radio ON per node")
 energy_pernode
@@ -473,7 +469,7 @@ pdf("colors.pdf", 15, 10)
 if (file.exists("empty_t.log")) {
     no_packet_ts = read.table("empty_t.log", h=T)
 } else {
-    no_packet_ts = setNames(data.frame(matrix(ncol=6, nrow=0)), c("epoch", "dst", "n_ta", "length", "err_code", "time"))
+    no_packet_ts = setNames(data.frame(matrix(ncol=6, nrow=0)), c("epoch", "dst", "n_ta", "length", "status", "time"))
 }
 
 for (cur_epoch in show_epochs) {
@@ -507,8 +503,8 @@ for (cur_epoch in show_epochs) {
         cur_ta_tx = cur_send[cur_send$n_ta==t,]
         print(sort(cur_ta_ntx$src))
         cur_ta_rx = cur_recv[cur_recv$n_ta==t,]
-        cur_ta_wrong = within(cur_wrong[cur_wrong$n_ta==t, c("dst", "err_code")], wrong<-1)[c("dst", "wrong")]
-        cur_ta_nopkt = cur_nopkt[cur_nopkt$n_ta==t, c("dst", "err_code", "length")]
+        cur_ta_wrong = within(cur_wrong[cur_wrong$n_ta==t, c("dst", "status")], wrong<-1)[c("dst", "wrong")]
+        cur_ta_nopkt = cur_nopkt[cur_nopkt$n_ta==t, c("dst", "status", "length")]
         message("heard senders:")
         print(sort(unique(cur_ta_rx$src)))
         message("all receivers:")
@@ -523,7 +519,7 @@ for (cur_epoch in show_epochs) {
         nodes = merge(nodes, cur_ta_tx[c("src", "seqn", "acked")], by.x="node", by.y="src", all.x=T)
         nodes = merge(nodes, cur_ta_rx[c("src", "dst")], by.x="node", by.y="dst", all.x=T)
         nodes = merge(nodes, cur_ta_wrong[c("dst", "wrong")], by.x="node", by.y="dst", all.x=T)
-        nodes = merge(nodes, cur_ta_nopkt[c("dst", "err_code", "length")], by.x="node", by.y="dst", all.x=T)
+        nodes = merge(nodes, cur_ta_nopkt[c("dst", "status", "length")], by.x="node", by.y="dst", all.x=T)
 
         nodes[!is.na(nodes$n_tx), c("n_tx")] <- 1
         nodes = rename(nodes, c("n_tx"="tx"))
@@ -552,8 +548,8 @@ for (cur_epoch in show_epochs) {
             geom_text_repel(data=nodes_tx[nodes_tx$acked==1,], size=3.5, label="A") +
             #geom_text_repel(size=2.5, aes(label=hops), box.padding = unit(0.5, "lines"), point.padding = unit(0.05, "lines"), segment.color = 'grey50', segment.size=0) +
             geom_text(size=2.5, aes(label=hops), nudge_x=15, nudge_y=15, color="gray30") +
-            geom_text(data=nodes[nodes$err_code == CRYSTAL_HIGH_NOISE,], size=4, aes(label=length), nudge_x=0, nudge_y=-28, color="red") +
-            geom_text(data=nodes[nodes$err_code == CRYSTAL_SILENCE,], size=4, aes(label=length), nudge_x=0, nudge_y=-28, color="blue") +
+            geom_text(data=nodes[nodes$status == CRYSTAL_HIGH_NOISE,], size=4, aes(label=length), nudge_x=0, nudge_y=-28, color="red") +
+            geom_text(data=nodes[nodes$status == CRYSTAL_SILENCE,], size=4, aes(label=length), nudge_x=0, nudge_y=-28, color="blue") +
             ylim(c(ymin, ymax)) + xlim(c(xmin, xmax)) +
             #scale_color_manual(values = cur_colors) +
             ggtitle(paste("Epoch:", cur_epoch, "TA:", t)) +

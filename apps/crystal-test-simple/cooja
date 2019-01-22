@@ -1,0 +1,8 @@
+#!/bin/bash
+CONTIKI=../..
+
+if [ -n "$1" ]
+then QS="-quickstart=$1"
+fi
+
+java -mx1024m -jar $CONTIKI/tools/cooja/dist/cooja.jar $QS -contiki=$CONTIKI 

@@ -1,6 +1,6 @@
 .*.swp
-app/crystal/symbols.c
-app/crystal/symbols.h
+symbols.c
+symbols.h
 obj_sky
 contiki-sky.map
 contiki-sky.a
@@ -8,3 +8,5 @@ COOJA.log
 old_exps
 tags
 apps/glossy-test/sndtbl.c
+*.sky
+*.sky.env
