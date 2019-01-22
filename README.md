@@ -9,7 +9,7 @@ Crystal got the [2nd prize](https://iti-testbed.tugraz.at/blog/page/11/ewsn-18-d
  * **Interference-Resilient Ultra-Low Power Aperiodic Data Collection**, Timofei Istomin, Matteo Trobinger, Amy L. Murphy, Gian Pietro Picco.  In Proceedings of the International Conference on Information Processing in Sensor Networks (IPSN 2018), [PDF](http://disi.unitn.it/~picco/papers/ipsn18.pdf).
 
 ## Status
-Currently the protocol is implemented for the TMote Sky platform only. Porting it to more modern platforms is in our near future plans.
+Currently the protocol is implemented for the TMote Sky and CC2538 platforms only. Please contact us if you need the code for CC2538.
 
 The **master** branch is the current stable branch of Crystal, while the **devel** branch has the most recent modifications. 
 
@@ -18,14 +18,14 @@ Please contact us in case you need the exact code we used in IPSN'18 experiments
 ***Disclaimer:*** *Although we tested the code extensively, Crystal is a research prototype that likely contains bugs. We take no responsibility for and give no warranties in respect of using the code.*
 
 ## Examples
-You can find a very simple example in `apps/crystal-test-simple`. Refer to the `README` file there for building instructions for Cooja and TMote Sky.
+You can find a very simple example in `apps/crystal-test-simple`. Refer to the `README` file there for building instructions for Cooja and TMote Sky. Another example, `apps/crystal-test` is an application similar to the one we used in the SenSys'16 and IPSN'18 studies. It is used by our scripts to generate test jobs for testbeds and process the collected logs (described below).
 
 ## Testing in testbeds
 To run experiments with different sets of parameters you can build a binary (or a set of binaries) using the `test_tools/simgen_ta.py` script. It reads the parameter set(s) from `params.py` file.
 
-A good starting point for defining your parameter set can be found in the `exps/example/` directory. You may copy the whole directory and edit the parameters and the list of nodes present in the testbed. After that, run `../../test_tools/simgen_ta.py`. It will create one or several subdirectories (if they don't exist) named after the individual parameter sets defined in the `params.py` file. 
+A good starting point for defining your parameter set can be found in the `exps/example/` directory. You may copy the whole directory and edit the parameters and the list of nodes present in the testbed. After that, run `../../test_tools/simgen_ta.py`. It will create one or several subdirectories (if they don't exist) named after the individual parameter sets defined in the `params.py` file and put there the binaries compiled from `apps/crystal-test`.
 
-You can specify "cooja" in the testbed name to compile for Cooja, list the node IDs, and use MRM radio model for simulations (e.g., one defined in `apps/crystal-test-simple/mrm.csc`).
+You can specify "cooja" in the testbed name to compile for Cooja, list the node IDs, and use MRM radio model for simulations (e.g., one defined in `apps/crystal-test/mrm.csc`).
 
 ## Notes on Cooja
 
