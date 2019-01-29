@@ -117,7 +117,7 @@ def mk_env(power, channel, sink, num_senders, n_empty, cca):
 
     if logging:
         cflags += ["-DCRYSTAL_CONF_LOGLEVEL=CRYSTAL_LOGS_ALL"]
-        if testbed in ["indriya", "fbk", "twist"]:
+        if testbed in ["indriya", "fbk", "twist", "flock"]:
             cflags += ["-DCRYSTAL_CONF_TIME_FOR_APP=\(RTIMER_SECOND/3\)"]
         else:
             cflags += ["-DCRYSTAL_CONF_TIME_FOR_APP=\(RTIMER_SECOND/10\)"]
