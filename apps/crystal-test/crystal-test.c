@@ -180,6 +180,7 @@ PROCESS_THREAD(crystal_test, ev, data) {
   PROCESS_BEGIN();
 
   static struct etimer et;
+  static bool ret;
   EPOCH_END_EV = process_alloc_event();  
 
   is_sink = node_id == SINK_ID;
@@ -201,7 +202,9 @@ PROCESS_THREAD(crystal_test, ev, data) {
   conf.is_sink = is_sink;
 
   PRINT_CRYSTAL_CONFIG(conf);
-  crystal_start(&conf);
+  ret = crystal_start(&conf);
+  if (!ret)
+    printf("Crystal failed to start\n");
 
 #if LOGGING
   while(1) {
@@ -237,4 +240,3 @@ PROCESS_THREAD(crystal_test, ev, data) {
 
 
 void app_pre_epoch() {}
-
