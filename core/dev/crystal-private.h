@@ -61,7 +61,7 @@
 #define N_SILENT_EPOCHS_TO_RESET 100
 #define N_SILENT_EPOCHS_TO_STOP_SENDING 3
 
-#define APP_PING_INTERVAL (RTIMER_SECOND / 31) // 32 ms
+//#define APP_PING_INTERVAL (RTIMER_SECOND / 31) // 32 ms // deprecated
 
 
 #define CRYSTAL_RECV_OK    0

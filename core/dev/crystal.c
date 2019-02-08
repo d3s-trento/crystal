@@ -74,7 +74,6 @@ static crystal_config_t conf = {
 };
 
 crystal_info_t crystal_info;          // public read-only status information about Crystal
-
 crystal_app_log_t crystal_app_log;
 
 static uint8_t* payload;                     // application payload pointer for the current slot

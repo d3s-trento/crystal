@@ -104,7 +104,6 @@ typedef struct {
   uint16_t recv_seqn;
   uint16_t recv_src;
   uint8_t  acked;
-  
 } crystal_app_log_t;
 
 /* A variable holding the current state of Crystal */
