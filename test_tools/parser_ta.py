@@ -24,6 +24,7 @@ record_pattern = {
         "indriya":"^%s\s+[0-9-]+\s+[0-9:]+\s40(?P<self_id>\d+)\s+(?P<time>\d+)\s+\d+$", # Indriya Motelab
         "twist":"^(?P<time>\d+[.]\d+)\s+(?P<self_id>\d+)\s+%s", # TWIST testbed
         "flocklab":"^(?P<time>\d+[.]\d+)[,][0-9]+[,](?P<self_id>\d+)[,][a-z][,]%s$", # FlockLab Testbed
+        "unitn":"^(?P<time>.{23}) INFO - (?P<self_id>\d+) < b'%s'$"
         }.get(record_format, None)
 
 fname_pattern = re.compile("log_(?P<self_id>\d+).txt")
@@ -47,6 +48,8 @@ def convert_time(time):
         seconds,millis = rest.split(".")
         return 1000*(int(millis)+int(seconds)*1000+int(minutes)*60*1000)
     elif record_format == "graz":
+        return 0 # TODO
+    elif record_format == "unitn":
         return 0 # TODO
     else:
         return time
