@@ -21,7 +21,7 @@ CFLAGS+=" -DNODE_ID=$NODE_ID"
 export CFLAGS
 
 make clean
-rm crystal-test.sky
+rm -f crystal-test.sky crystal-test.ihex
 
-make && mv crystal-test.sky crystal-test-$NODE_ID.sky
+make crystal-test.ihex && mv crystal-test.sky crystal-test-$NODE_ID.sky && mv crystal-test.ihex crystal-test-$NODE_ID.ihex 
 rm -f symbols.h symbols.c

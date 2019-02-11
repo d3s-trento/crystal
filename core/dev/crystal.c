@@ -906,12 +906,8 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
   PT_END(&pt);
 }
 
-// TUNING AGC to avoid saturation in RSSI readings
-// warning: it makes the reception less reliable
-static void tune_AGC_radio() {
-  unsigned reg_agctst;
-  FASTSPI_GETREG(CC2420_AGCTST1, reg_agctst);
-  FASTSPI_SETREG(CC2420_AGCTST1, (reg_agctst + (1 << 8) + (1 << 13)));
+void crystal_init() {
+  cc2420_set_channel(CRYSTAL_DEF_CHANNEL);
 }
 
 static inline void measure_noise() {
@@ -945,10 +941,9 @@ bool crystal_start(crystal_config_t* conf_)
 
   //leds_on(LEDS_RED);
 
-  channel = RF_CHANNEL;
+  channel = CRYSTAL_DEF_CHANNEL;
   cc2420_set_txpower(TX_POWER);
   cc2420_set_cca_threshold(CRYSTAL_CCA_THRESHOLD);
-  //tune_AGC_radio();
 
   // Start Glossy busy-waiting process.
   process_start(&glossy_process, NULL);
@@ -957,7 +952,9 @@ bool crystal_start(crystal_config_t* conf_)
   return true;
 }
 
-void crystal_stop() {/* TODO */}
+void crystal_stop() {
+  /* TODO */
+}
 
 void crystal_print_epoch_logs() {
   static int first_time = 1;

@@ -10,7 +10,7 @@
 #define BSTRAP_hop3  3
 
 #if CRYSTAL_CHHOP_MAPPING == CHMAP_nohop
-int channel_array[16] = {[0 ... 15] = RF_CHANNEL}; // no channel hopping
+int channel_array[16] = {[0 ... 15] = CRYSTAL_DEF_CHANNEL}; // no channel hopping
 #elif CRYSTAL_CHHOP_MAPPING == CHMAP_nomap 
 int channel_array[16] = {11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26}; // no mapping
 #elif CRYSTAL_CHHOP_MAPPING == CHMAP_split 
@@ -50,7 +50,7 @@ enum scan_rx {SCAN_RX_NOTHING, SCAN_RX_S, SCAN_RX_A};
 
 #if CRYSTAL_BSTRAP_CHHOPPING == BSTRAP_nohop
 static inline int get_channel_node_bootstrap(){
-  return RF_CHANNEL;
+  return CRYSTAL_DEF_CHANNEL;
 }
 #elif CRYSTAL_BSTRAP_CHHOPPING == BSTRAP_hop3
 

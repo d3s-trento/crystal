@@ -89,7 +89,7 @@ def prepare_binary(simdir, nodes, num_epochs, concurrent_txs, new_env):
 def mk_env(power, channel, sink, num_senders, n_empty, cca):
     cflags = [
     "-DTX_POWER=%d"%power,
-    "-DRF_CHANNEL=%d"%channel,
+    "-DCRYSTAL_CONF_DEF_CHANNEL=%d"%channel,
     "-DSINK_ID=%d"%sink,
     "-DSTART_EPOCH=%d"%start_epoch,
     "-DCONCURRENT_TXS=%d"%num_senders,

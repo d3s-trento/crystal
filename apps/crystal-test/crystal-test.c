@@ -193,6 +193,7 @@ PROCESS_THREAD(crystal_test, ev, data) {
   PROCESS_YIELD_UNTIL(etimer_expired(&et));
 
 
+  crystal_init();
   printf("I am alive! Node ID: %d, EUI-64: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n", node_id, ds2411_id[0],ds2411_id[1],ds2411_id[2],ds2411_id[3],ds2411_id[4],ds2411_id[5],ds2411_id[6],ds2411_id[7]);
 
   conf = crystal_get_config();
