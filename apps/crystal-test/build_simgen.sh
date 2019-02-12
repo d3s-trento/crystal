@@ -7,12 +7,9 @@ rm -f crystal-test.sky
 rm -f crystal-test.sky.ihex
 rm -f $ENV
 
-
-rm $ENV
 pwd 2>&1 | tee -a $ENV
 msp430-gcc --version 2>&1 | tee -a $ENV
 export 2>&1 | tee -a $ENV
-
 
 echo "-- git status -------" >> $ENV
 git log -1 --format="%H" >> $ENV

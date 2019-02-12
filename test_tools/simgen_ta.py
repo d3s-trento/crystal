@@ -51,9 +51,8 @@ def generate_table_array(nodes, num_epochs, concurrent_txs):
     return "static const uint8_t sndtbl[] = {%s};"%",".join([str(x) for x in tbl])
 
 
-binary_name = "crystal-test.sky"
 
-def prepare_binary(simdir, nodes, num_epochs, concurrent_txs, new_env):
+def prepare_binary(simdir, binary_name, nodes, num_epochs, concurrent_txs, new_env):
     env = os.environ.copy()
     env.update(new_env)
 
@@ -81,7 +80,8 @@ def prepare_binary(simdir, nodes, num_epochs, concurrent_txs, new_env):
             f.write("%d\n"%n)
     
     copy(abs_bname, simdir)
-    copy(abs_ihex_name, simdir)
+    if os.path.isfile(abs_ihex_name):
+        copy(abs_ihex_name, simdir)
     copy(abs_env_name, simdir)
 
 
@@ -186,6 +186,8 @@ with open("nodelist.txt") as f:
             all_nodes.add(int(l.strip()))
 
 
+binary_name = "crystal-test.sky" if testbed != "unitn" else "crystal-test.bin" 
+
 simnum = 0
 for (power, channel, sink, num_senders, n_empty, cca, nodemap) in itertools.product(powers, channels, sinks, num_senderss, n_emptys, ccas, nodemaps):
     n_empty = NemptyTuple(*n_empty)
@@ -208,11 +210,13 @@ for (power, channel, sink, num_senders, n_empty, cca, nodemap) in itertools.prod
 
         if sink not in nodes:
             raise Exception("Sink node doesn't exist")
-        all_senders = [x for x in nodes if x!=sink]
 
+        all_senders = [x for x in nodes if x!=sink]
+        if (num_senders > len(all_senders)):
+            raise Exception("More senders than nodes: %d > %d, skipping test"%(num_senders, len(all_senders)))
 
         new_env = mk_env(power, channel, sink, num_senders, n_empty, cca)
-        prepare_binary(simdir, all_senders, active_epochs, num_senders, new_env)
+        prepare_binary(simdir, binary_name, all_senders, active_epochs, num_senders, new_env)
         if nodemap != "all":
             copy(nodemap_txt, os.path.join(simdir, "nodemap.txt"))
         
@@ -255,6 +259,7 @@ for (power, channel, sink, num_senders, n_empty, cca, nodemap) in itertools.prod
             f.write(values)
             f.write("\n")
         simnum += 1
+        print "-"*40
     except Exception, e:
         traceback.print_exc()
         if os.path.isdir(simdir):
