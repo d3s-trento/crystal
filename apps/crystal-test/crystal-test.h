@@ -6,7 +6,7 @@
 #define NO_SEQN 65535
 
 typedef struct {
-  uint8_t payload[PAYLOAD_LENGTH]
+  uint8_t payload[PAYLOAD_LENGTH];
 } 
 __attribute__((packed))
 app_s_payload;
