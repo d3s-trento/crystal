@@ -80,14 +80,16 @@ static uint8_t* payload;                     // application payload pointer for 
 
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy structure to be used in different phases
 
-static struct rtimer rt;              // Rtimer used to schedule Crystal.
-static struct pt pt;                  // Protothread used to schedule Crystal.
+static struct rtimer rt;              // Rtimer used to schedule Crystal
+static struct pt pt;                  // Main protothread of Crystal
+static struct pt pt_scan;             // Protothread for scanning the channel
+static struct pt pt_s_node;           // Protothread for S phase (non-root)
+static struct pt pt_ta_node;          // Protothread for TA pair (non-root)
 
 static crystal_epoch_t epoch;         // epoch seqn received from the sink (or extrapolated)
 static uint8_t channel;               // current channel
 static uint16_t skew_estimated;       // Not zero if the clock skew over a period of length CRYSTAL_PERIOD has already been estimated.
 static uint16_t synced_with_ack;      // Synchronized with an acknowledgement (A phase)
-static uint16_t ever_synced_with_s;   // Synchronized with an S at least once
 static uint16_t n_noack_epochs;       // Number of consecutive epochs the node did not synchronize with any acknowledgement
 static int sync_missed = 0;           // Current number of consecutive S phases without synchronization (reference time not computed)
 // WARNING: skew division breaks if sync_missed is unsigned!
@@ -104,8 +106,6 @@ static rtimer_clock_t t_wakeup;       // Time to wake up to prepare for the next
 
 static uint16_t correct_packet; // whether the received packet is correct
 
-static uint16_t skip_S;       // skipt the S phase (if joining in the middle of TA chain)
-static uint16_t starting_n_ta;// the first TA index in an epoch (if joining in the middle of TA chain)
 static uint16_t n_ta;         // the current TA index in the epoch
 static uint16_t n_ta_tx;      // how many times node tried to send data in the epoch
 static uint16_t n_empty_ts;   // number of consecutive "T" phases without data
@@ -492,12 +492,9 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
   PT_END(&pt);
 }
 
-static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
-  static rtimer_clock_t now;
-  static rtimer_clock_t offs;
-  static rtimer_clock_t s_guard;
-  PT_BEGIN(&pt);
-
+PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
+{
+  PT_BEGIN(&pt_scan);
   channel = get_channel_node_bootstrap(SCAN_RX_NOTHING);
 
   // Scanning loop
@@ -513,7 +510,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
         0, // don't specify packet type
         1, // ignore type (receive anything)
         t_phase_start, t_phase_stop, timer_handler, t, ptr);
-    PT_YIELD(&pt);
+    PT_YIELD(&pt_scan);
     glossy_stop();
 
     if (get_rx_cnt() > 0) {
@@ -564,6 +561,269 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
   if (recvtype_S != CRYSTAL_TYPE_SYNC)
     bzero(&glossy_S, sizeof(glossy_S)); // reset the timing info if a non-S packet was received
+
+  PT_END(&pt_scan);
+}
+
+
+PT_THREAD(pt_s_node_thread(struct rtimer *t, void* ptr))
+{
+  static uint16_t ever_synced_with_s;   // Synchronized with an S at least once
+  PT_BEGIN(&pt_s_node);
+  
+  // -- Phase S (non-root) --------------------------------------------------------- S (non-root) ---
+  channel = get_channel_epoch(epoch);
+
+  glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
+      GLOSSY_RECEIVER, channel, GLOSSY_SYNC, conf.ntx_S,
+      0, // don't stop on sync
+      CRYSTAL_TYPE_SYNC, 
+      0, // don't ignore type
+      t_phase_start, t_phase_stop, timer_handler, t, ptr);
+
+  PT_YIELD(&pt_s_node);
+  glossy_stop();
+
+  UPDATE_SLOT_STATS(S, 0);
+
+  recvlen_S = get_data_len();
+  recvtype_S = get_app_header();
+  recvsrc_S = buf.sync_hdr.src;
+  rx_count_S = get_rx_cnt();
+  tx_count_S = get_tx_cnt();
+
+  correct_packet = (recvtype_S == CRYSTAL_TYPE_SYNC 
+      /*&& recvsrc_S  == conf.sink_id */
+      && recvlen_S  == CRYSTAL_S_LEN);
+
+  if (rx_count_S > 0 && correct_packet) {
+    epoch = buf.sync_hdr.epoch;
+    hopcount = get_relay_cnt();
+  }
+  if (IS_SYNCED() && rx_count_S > 0
+      && correct_packet
+      && correct_hops()) {
+    corrected_ref_time_s = get_t_ref_l();
+    corrected_ref_time = corrected_ref_time_s; // use this corrected ref time in the current epoch
+
+    if (ever_synced_with_s) {
+      // can estimate skew
+      period_skew = (int16_t)(corrected_ref_time_s - (skewed_ref_time + conf.period)) / (sync_missed + 1);
+      skew_estimated = 1;
+    }
+
+    skewed_ref_time = corrected_ref_time_s;
+    ever_synced_with_s = 1;
+    sync_missed = 0;
+  }
+  else {
+    sync_missed++;
+    skewed_ref_time += conf.period;
+    corrected_ref_time = estimated_ref_time; // use the estimate if didn't update
+    corrected_ref_time_s = estimated_ref_time;
+  }
+  //end_of_s_time = RTIMER_NOW()-ref_time; // just for debugging
+
+  app_post_S(correct_packet, buf.raw + sizeof(crystal_sync_hdr_t));
+  BZERO_BUF();
+
+
+  crystal_info.hops = hopcount;
+  crystal_info.n_missed_s = sync_missed;
+  // -- Phase S end (non-root) ------------------------------------------------- S end (non-root) ---
+  PT_END(&pt_s_node);
+}
+
+PT_THREAD(pt_ta_node_thread(struct rtimer *t, void* ptr))
+{
+  PT_BEGIN(&pt_ta_node);
+
+  while (1) { /* TA loop */
+    crystal_info.n_ta = n_ta;
+    // -- Phase T (non-root) --------------------------------------------------------- T (non-root) ---
+    static int guard;
+    static uint16_t have_packet;
+    static int i_tx;
+
+    init_ta_log_vars();
+    correct_packet = 0;
+    payload = app_pre_T();
+    have_packet = payload != NULL;
+
+    i_tx = (have_packet && 
+        (sync_missed < N_SILENT_EPOCHS_TO_STOP_SENDING || n_noack_epochs < N_SILENT_EPOCHS_TO_STOP_SENDING));
+    // TODO: instead of just suppressing tx when out of sync it's better to scan for ACKs or Sync beacons...
+
+    if (i_tx) {
+      n_ta_tx ++;
+      // no guards if I transmit
+      guard = 0;
+      memcpy(buf.raw + sizeof(crystal_data_hdr_t), payload, conf.plds_T);
+    }
+    else {
+      // guards for receiving
+      guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
+    }
+    t_phase_start = corrected_ref_time + PHASE_T_OFFS(n_ta) - CRYSTAL_REF_SHIFT - guard;
+    t_phase_stop = t_phase_start + conf.w_T + guard;
+
+    //choice of the channel for each T-A slot
+    channel = get_channel_epoch_ta(epoch, n_ta);
+
+    glossy_start(&glossy_T, buf.raw, CRYSTAL_T_LEN, 
+        i_tx, channel, GLOSSY_NO_SYNC, conf.ntx_T,
+        0, // don't stop on sync
+        CRYSTAL_TYPE_DATA, 
+        0, // don't ignore type
+        t_phase_start, t_phase_stop, timer_handler, t, ptr);
+
+    PT_YIELD(&pt_ta_node);
+    glossy_stop();
+    UPDATE_SLOT_STATS(T, i_tx);
+
+    rx_count_T = get_rx_cnt();
+    if (!i_tx) {
+      if (rx_count_T) { // received data
+        log_recv_type = get_app_header();
+        log_recv_length = get_data_len();
+        correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
+        log_ta_status = correct_packet?CRYSTAL_RECV_OK:CRYSTAL_BAD_DATA;
+        n_empty_ts = 0;
+      }
+      else if (is_corrupted()) {
+        log_ta_status = CRYSTAL_BAD_CRC;
+        //n_empty_ts = 0; // keep it as it is to give another chance but not too many chances
+      } 
+      else { // TODO: should we check for the high noise also here?
+        log_ta_status = CRYSTAL_SILENCE;
+        n_empty_ts ++;
+      }
+      cca_busy_cnt = get_cca_busy_cnt();
+    }
+
+    app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
+
+    BZERO_BUF();
+
+    // -- Phase T end (non-root) ------------------------------------------------- T end (non-root) ---
+
+    // -- Phase A (non-root) --------------------------------------------------------- A (non-root) ---
+
+    correct_packet = 0;
+    guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
+    t_phase_start = corrected_ref_time - guard + PHASE_A_OFFS(n_ta) - CRYSTAL_REF_SHIFT;
+    t_phase_stop = t_phase_start + conf.w_A + guard;
+
+    glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN, 
+        GLOSSY_RECEIVER, channel, CRYSTAL_SYNC_ACKS, conf.ntx_A,
+        0, // don't stop on sync
+        CRYSTAL_TYPE_ACK, 
+        0, // don't ignore type
+        t_phase_start, t_phase_stop, timer_handler, t, ptr);
+
+    PT_YIELD(&pt_ta_node);
+    glossy_stop();
+    UPDATE_SLOT_STATS(A, 0);
+
+    rx_count_A = get_rx_cnt();
+    if (rx_count_A) {
+      if (get_data_len() == CRYSTAL_A_LEN 
+          && get_app_header() == CRYSTAL_TYPE_ACK 
+          && CRYSTAL_ACK_CMD_CORRECT(buf.ack_hdr)) {
+        correct_packet = 1;
+        n_noacks = 0;
+        n_bad_acks = 0;
+        n_all_acks ++;
+        // Updating the epoch in case we "skipped" some epochs but got an ACK
+        // We can "skip" epochs if we are too late for the next TA and set the timer to the past
+        epoch = buf.ack_hdr.epoch; 
+        crystal_info.epoch = epoch;
+
+#if (CRYSTAL_SYNC_ACKS)
+        // sometimes we get a packet with a corrupted n_ta
+        // (e.g. 234) that's why checking the value
+        // sometimes also the ref time is reported incorrectly, so have to check
+        if (IS_SYNCED() && buf.ack_hdr.n_ta == n_ta
+            && correct_ack_skew(N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta))
+           ) {
+
+          corrected_ref_time = N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta);
+          synced_with_ack ++;
+          n_noack_epochs = 0; // it's important to reset it here to reenable TX right away (if it was suppressed)
+        }
+#endif
+
+        if (CRYSTAL_ACK_SLEEP(buf.ack_hdr)) {
+          sleep_order = 1;
+        }
+      }
+      else {
+        // received something but not an ack (we might be out of sync)
+        // n_noacks ++; // keep it as it is to give another chance but not too many chances
+        n_bad_acks ++;
+      }
+
+      // logging info about bad packets
+      if (get_app_header() != CRYSTAL_TYPE_ACK)
+        n_badtype_A ++;
+      if (get_data_len() != CRYSTAL_A_LEN)
+        n_badlen_A ++;
+
+      n_high_noise = 0;
+    }
+    else if (is_corrupted()) { // bad CRC
+      // n_noacks ++; // keep it as it is to give another chance but not too many chances
+      n_bad_acks ++;
+      n_badcrc_A ++;
+      n_high_noise = 0;
+    }
+    else { // not received anything
+      if (conf.xa == 0)
+        n_noacks ++; // no "noise detection"
+      else if (get_cca_busy_cnt() > CRYSTAL_CCA_COUNTER_THRESHOLD) {
+        n_high_noise ++;
+        if (n_high_noise > conf.xa)
+          n_noacks ++;
+      }
+      else {
+        n_noacks ++;
+        n_high_noise = 0;
+      }
+    }
+
+    app_post_A(correct_packet, buf.raw + sizeof(crystal_ack_hdr_t));
+
+    log_ta(i_tx);
+
+    BZERO_BUF();
+    // -- Phase A end (non-root) ------------------------------------------------- A end (non-root) ---
+    n_ta ++;
+    // shall we stop?
+    if (sleep_order || (n_ta >= CRYSTAL_MAX_TAS) || // always stop when ordered or max is reached
+        (epoch >= CRYSTAL_N_FULL_EPOCHS && 
+                      (
+                         (  have_packet  && (n_noacks >= conf.z)) ||
+                         ((!have_packet) && (n_noacks >= conf.y) && n_empty_ts >= conf.y)
+                      )
+        )
+       ) {
+
+      break; // Stop the TA chain
+    }
+  } /* End of TA loop */
+  PT_END(&pt_ta_node);
+}
+
+
+static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
+  static rtimer_clock_t s_guard;
+  static rtimer_clock_t now;
+  static rtimer_clock_t offs;
+  static uint16_t skip_S;        // skip the S phase (if joining in the middle of TA chain)
+  static uint16_t starting_n_ta; // the first TA index in an epoch (if joining in the middle of TA chain)
+  PT_BEGIN(&pt);
+
+  PT_SPAWN(&pt, &pt_scan, pt_scan_thread(t, ptr));
 
   app_crystal_start_done(true);
   BZERO_BUF();
@@ -624,6 +884,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
     crystal_info.n_ta = 0;
 
     if (!skip_S) {
+      starting_n_ta = 0;
       cc2420_oscon();
 
       app_pre_S();
@@ -632,249 +893,14 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       rtimer_set(t, t_phase_start - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
       PT_YIELD(&pt);
 
-      // -- Phase S (non-root) --------------------------------------------------------- S (non-root) ---
-
       epoch ++;
       crystal_info.epoch = epoch;
-
-      channel = get_channel_epoch(epoch);
-
-      glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
-          GLOSSY_RECEIVER, channel, GLOSSY_SYNC, conf.ntx_S,
-          0, // don't stop on sync
-          CRYSTAL_TYPE_SYNC, 
-          0, // don't ignore type
-          t_phase_start, t_phase_stop, timer_handler, t, ptr);
-
-      PT_YIELD(&pt);
-      glossy_stop();
-
-      UPDATE_SLOT_STATS(S, 0);
-
-      recvlen_S = get_data_len();
-      recvtype_S = get_app_header();
-      recvsrc_S = buf.sync_hdr.src;
-      rx_count_S = get_rx_cnt();
-      tx_count_S = get_tx_cnt();
-
-      correct_packet = (recvtype_S == CRYSTAL_TYPE_SYNC 
-          /*&& recvsrc_S  == conf.sink_id */
-          && recvlen_S  == CRYSTAL_S_LEN);
-
-      if (rx_count_S > 0 && correct_packet) {
-        epoch = buf.sync_hdr.epoch;
-        hopcount = get_relay_cnt();
-      }
-      if (IS_SYNCED() && rx_count_S > 0
-          && correct_packet
-          && correct_hops()) {
-        corrected_ref_time_s = get_t_ref_l();
-        corrected_ref_time = corrected_ref_time_s; // use this corrected ref time in the current epoch
-
-        if (ever_synced_with_s) {
-          // can estimate skew
-          period_skew = (int16_t)(corrected_ref_time_s - (skewed_ref_time + conf.period)) / (sync_missed + 1);
-          skew_estimated = 1;
-        }
-
-        skewed_ref_time = corrected_ref_time_s;
-        ever_synced_with_s = 1;
-        sync_missed = 0;
-      }
-      else {
-        sync_missed++;
-        skewed_ref_time += conf.period;
-        corrected_ref_time = estimated_ref_time; // use the estimate if didn't update
-        corrected_ref_time_s = estimated_ref_time;
-      }
-      //end_of_s_time = RTIMER_NOW()-ref_time; // just for debugging
-
-      app_post_S(correct_packet, buf.raw + sizeof(crystal_sync_hdr_t));
-      BZERO_BUF();
-
-      starting_n_ta = 0;
-      
-      crystal_info.hops = hopcount;
-      crystal_info.n_missed_s = sync_missed;
+      PT_SPAWN(&pt, &pt_s_node, pt_s_node_thread(t, ptr));
     }
     skip_S = 0;
-
-    // -- Phase S end (non-root) ------------------------------------------------- S end (non-root) ---
-
     n_ta = starting_n_ta;
-    while (1) { /* TA loop */
-      // -- Phase T (non-root) --------------------------------------------------------- T (non-root) ---
-      static int guard;
-      static uint16_t have_packet;
-      static int i_tx;
 
-      init_ta_log_vars();
-      crystal_info.n_ta = n_ta;
-      correct_packet = 0;
-      payload = app_pre_T();
-      have_packet = payload != NULL;
-
-      i_tx = (have_packet && 
-          (sync_missed < N_SILENT_EPOCHS_TO_STOP_SENDING || n_noack_epochs < N_SILENT_EPOCHS_TO_STOP_SENDING));
-      // TODO: instead of just suppressing tx when out of sync it's better to scan for ACKs or Sync beacons...
-
-      if (i_tx) {
-        n_ta_tx ++;
-        // no guards if I transmit
-        guard = 0;
-        memcpy(buf.raw + sizeof(crystal_data_hdr_t), payload, conf.plds_T);
-      }
-      else {
-        // guards for receiving
-        guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
-      }
-      t_phase_start = corrected_ref_time + PHASE_T_OFFS(n_ta) - CRYSTAL_REF_SHIFT - guard;
-      t_phase_stop = t_phase_start + conf.w_T + guard;
-
-      //choice of the channel for each T-A slot
-      channel = get_channel_epoch_ta(epoch, n_ta);
-      
-      glossy_start(&glossy_T, buf.raw, CRYSTAL_T_LEN, 
-          i_tx, channel, GLOSSY_NO_SYNC, conf.ntx_T,
-          0, // don't stop on sync
-          CRYSTAL_TYPE_DATA, 
-          0, // don't ignore type
-          t_phase_start, t_phase_stop, timer_handler, t, ptr);
-
-      PT_YIELD(&pt);
-      glossy_stop();
-      UPDATE_SLOT_STATS(T, i_tx);
-
-      rx_count_T = get_rx_cnt();
-      if (!i_tx) {
-        if (rx_count_T) { // received data
-          log_recv_type = get_app_header();
-          log_recv_length = get_data_len();
-          correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
-          log_ta_status = correct_packet?CRYSTAL_RECV_OK:CRYSTAL_BAD_DATA;
-          n_empty_ts = 0;
-        }
-        else if (is_corrupted()) {
-          log_ta_status = CRYSTAL_BAD_CRC;
-          //n_empty_ts = 0; // keep it as it is to give another chance but not too many chances
-        } 
-        else { // TODO: should we check for the high noise also here?
-          log_ta_status = CRYSTAL_SILENCE;
-          n_empty_ts ++;
-        }
-        cca_busy_cnt = get_cca_busy_cnt();
-      }
-
-      app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
-
-      BZERO_BUF();
-
-      // -- Phase T end (non-root) ------------------------------------------------- T end (non-root) ---
-
-      // -- Phase A (non-root) --------------------------------------------------------- A (non-root) ---
-
-      correct_packet = 0;
-      guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
-      t_phase_start = corrected_ref_time - guard + PHASE_A_OFFS(n_ta) - CRYSTAL_REF_SHIFT;
-      t_phase_stop = t_phase_start + conf.w_A + guard;
-
-      glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN, 
-          GLOSSY_RECEIVER, channel, CRYSTAL_SYNC_ACKS, conf.ntx_A,
-          0, // don't stop on sync
-          CRYSTAL_TYPE_ACK, 
-          0, // don't ignore type
-          t_phase_start, t_phase_stop, timer_handler, t, ptr);
-
-      PT_YIELD(&pt);
-      glossy_stop();
-      UPDATE_SLOT_STATS(A, 0);
-
-      rx_count_A = get_rx_cnt();
-      if (rx_count_A) {
-        if (get_data_len() == CRYSTAL_A_LEN 
-            && get_app_header() == CRYSTAL_TYPE_ACK 
-            && CRYSTAL_ACK_CMD_CORRECT(buf.ack_hdr)) {
-          correct_packet = 1;
-          n_noacks = 0;
-          n_bad_acks = 0;
-          n_all_acks ++;
-          // Updating the epoch in case we "skipped" some epochs but got an ACK
-          // We can "skip" epochs if we are too late for the next TA and set the timer to the past
-          epoch = buf.ack_hdr.epoch; 
-          crystal_info.epoch = epoch;
-
-          #if (CRYSTAL_SYNC_ACKS)
-          // sometimes we get a packet with a corrupted n_ta
-          // (e.g. 234) that's why checking the value
-          // sometimes also the ref time is reported incorrectly, so have to check
-          if (IS_SYNCED() && buf.ack_hdr.n_ta == n_ta
-              && correct_ack_skew(N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta))
-             ) {
-
-            corrected_ref_time = N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta);
-            synced_with_ack ++;
-            n_noack_epochs = 0; // it's important to reset it here to reenable TX right away (if it was suppressed)
-          }
-          #endif
-
-          if (CRYSTAL_ACK_SLEEP(buf.ack_hdr)) {
-            sleep_order = 1;
-          }
-        }
-        else {
-          // received something but not an ack (we might be out of sync)
-          // n_noacks ++; // keep it as it is to give another chance but not too many chances
-          n_bad_acks ++;
-        }
-
-        // logging info about bad packets
-        if (get_app_header() != CRYSTAL_TYPE_ACK)
-          n_badtype_A ++;
-        if (get_data_len() != CRYSTAL_A_LEN)
-          n_badlen_A ++;
-
-        n_high_noise = 0;
-      }
-      else if (is_corrupted()) { // bad CRC
-        // n_noacks ++; // keep it as it is to give another chance but not too many chances
-        n_bad_acks ++;
-        n_badcrc_A ++;
-        n_high_noise = 0;
-      }
-      else { // not received anything
-        if (conf.xa == 0)
-          n_noacks ++; // no "noise detection"
-        else if (get_cca_busy_cnt() > CRYSTAL_CCA_COUNTER_THRESHOLD) {
-          n_high_noise ++;
-          if (n_high_noise > conf.xa)
-            n_noacks ++;
-        }
-        else {
-          n_noacks ++;
-          n_high_noise = 0;
-        }
-      }
-
-      app_post_A(correct_packet, buf.raw + sizeof(crystal_ack_hdr_t));
-
-      log_ta(i_tx);
-
-      BZERO_BUF();
-      // -- Phase A end (non-root) ------------------------------------------------- A end (non-root) ---
-      n_ta ++;
-
-      // shall we stop?
-      if (sleep_order || (n_ta >= CRYSTAL_MAX_TAS) || // always stop when ordered or max is reached
-          (epoch >= CRYSTAL_N_FULL_EPOCHS && (
-              (  have_packet  && (n_noacks >= conf.z)) ||
-              ((!have_packet) && (n_noacks >= conf.y) && n_empty_ts >= conf.y)
-            )
-          )
-         ) {
-
-        break; // Stop the TA chain
-      }
-    } /* End of TA loop */
+    PT_SPAWN(&pt, &pt_ta_node, pt_ta_node_thread(t, ptr));
 
     if (!synced_with_ack) {
       n_noack_epochs ++;
