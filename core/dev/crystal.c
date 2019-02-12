@@ -76,9 +76,9 @@ static crystal_config_t conf = {
 crystal_info_t crystal_info;          // public read-only status information about Crystal
 crystal_app_log_t crystal_app_log;
 
-static uint8_t* payload;                     // application payload pointer for the current slot
+static uint8_t* payload;              // application payload pointer for the current slot
 
-static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy structure to be used in different phases
+static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy object to be used in different phases
 
 static struct rtimer rt;              // Rtimer used to schedule Crystal
 static struct pt pt;                  // Main protothread of Crystal
@@ -88,21 +88,21 @@ static struct pt pt_ta_node;          // Protothread for TA pair (non-root)
 
 static crystal_epoch_t epoch;         // epoch seqn received from the sink (or extrapolated)
 static uint8_t channel;               // current channel
-static uint16_t skew_estimated;       // Not zero if the clock skew over a period of length CRYSTAL_PERIOD has already been estimated.
+
 static uint16_t synced_with_ack;      // Synchronized with an acknowledgement (A phase)
 static uint16_t n_noack_epochs;       // Number of consecutive epochs the node did not synchronize with any acknowledgement
-static int sync_missed = 0;           // Current number of consecutive S phases without synchronization (reference time not computed)
-// WARNING: skew division breaks if sync_missed is unsigned!
+static uint16_t sync_missed = 0;      // Current number of consecutive S phases without synchronization (reference time not computed)
 
-static int period_skew;                     // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
-static rtimer_clock_t estimated_ref_time;   // estimated reference time for the current epoch
-static rtimer_clock_t corrected_ref_time_s; // reference time acquired during the S slot of the current epoch
-static rtimer_clock_t corrected_ref_time;   // reference time acquired during the S or an A slot of the current epoch
-static rtimer_clock_t skewed_ref_time;      // reference time in the local time frame
+static uint16_t skew_estimated;          // Not zero if the clock skew over a period of length CRYSTAL_PERIOD has already been estimated.
+static int      period_skew;             // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
 
-static rtimer_clock_t t_phase_start;  // Starting time (low-frequency clock) of a Glossy phase
-static rtimer_clock_t t_phase_stop;   // Stopping time of a Glossy phase
-static rtimer_clock_t t_wakeup;       // Time to wake up to prepare for the next epoch
+static rtimer_clock_t t_ref_estimated;            // estimated reference time for the current epoch
+static rtimer_clock_t t_ref_corrected_s;          // reference time acquired during the S slot of the current epoch
+static rtimer_clock_t t_ref_corrected;            // reference time acquired during the S or an A slot of the current epoch
+static rtimer_clock_t t_ref_skewed;               // reference time in the local time frame
+static rtimer_clock_t t_wakeup;                   // Time to wake up to prepare for the next epoch
+static rtimer_clock_t t_s_start, t_s_stop;        // Start/stop times for S slots
+static rtimer_clock_t t_slot_start, t_slot_stop;  // Start/stop times for T and A slots
 
 static uint16_t correct_packet; // whether the received packet is correct
 
@@ -121,7 +121,6 @@ static uint16_t recvtype_S;   // type of a packet received in S phase
 static uint16_t recvlen_S;    // length of a packet received in S phase
 static uint16_t recvsrc_S;    // source address of a packet received in S phase
 
-static uint32_t end_of_s_time; // timestamp of the end of the S phase, relative to the ref_time
 static uint16_t ack_skew_err;  // "wrong" ACK skew
 static uint16_t hopcount;
 static uint16_t rx_count_S, tx_count_S;  // tx and rx counters for S phase as reported by Glossy
@@ -280,7 +279,7 @@ static inline int correct_ack_skew(rtimer_clock_t new_ref) {
   if (get_relay_cnt()>MAX_CORRECT_HOPS)
     return 0;
 #endif
-  new_skew = new_ref - corrected_ref_time;
+  new_skew = new_ref - t_ref_corrected;
   //if (new_skew < 20 && new_skew > -20)  // IPSN'18
   if (new_skew < 60 && new_skew > -60)
     return 1;  // the skew looks correct
@@ -320,14 +319,13 @@ static inline void init_epoch_state() { // zero out epoch-related variables
 static rtimer_callback_t timer_handler;
 
 static char sink_timer_handler(struct rtimer *t, void *ptr) {
-  static rtimer_clock_t ref_time;
+  static rtimer_clock_t t_ref;
   PT_BEGIN(&pt);
 
   app_crystal_start_done(true);
 
   //leds_off(LEDS_RED);
-  ref_time = RTIMER_NOW() + OSC_STAB_TIME + GLOSSY_PRE_TIME + 16; // + 16 just to be sure
-  t_phase_start = ref_time;
+  t_ref = RTIMER_NOW() + OSC_STAB_TIME + GLOSSY_PRE_TIME + 16; // + 16 just to be sure
   while (1) {
     init_epoch_state();
 
@@ -338,8 +336,11 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
     crystal_info.n_ta = 0;
     payload = app_pre_S();
 
+    t_s_start = t_ref;
+    t_s_stop = t_s_start + conf.w_S;
+
     // wait for the oscillator to stabilize
-    rtimer_set(t, t_phase_start - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
+    rtimer_set(t, t_ref - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
     PT_YIELD(&pt);
 
     epoch ++;
@@ -353,7 +354,6 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
           payload, conf.plds_S);
     }
 
-    t_phase_stop = t_phase_start + conf.w_S;
     channel = get_channel_epoch(epoch);
 
     glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
@@ -361,7 +361,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
         0, // don't stop on sync
         CRYSTAL_TYPE_SYNC, 
         0, // don't ignore type
-        t_phase_start, t_phase_stop, timer_handler, t, ptr);
+        t_s_start, t_s_stop + conf.w_S, timer_handler, t, ptr);
     // Yield the protothread. It will be resumed when Glossy terminates.
     PT_YIELD(&pt);
 
@@ -380,8 +380,8 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
       crystal_info.n_ta = n_ta;
 
       // -- Phase T (root) ----------------------------------------------------------------- T (root) ---
-      t_phase_start = ref_time - CRYSTAL_SHORT_GUARD + PHASE_T_OFFS(n_ta);
-      t_phase_stop = t_phase_start + conf.w_T + CRYSTAL_SHORT_GUARD + CRYSTAL_SINK_END_GUARD;
+      t_slot_start = t_ref - CRYSTAL_SHORT_GUARD + PHASE_T_OFFS(n_ta);
+      t_slot_stop = t_slot_start + conf.w_T + CRYSTAL_SHORT_GUARD + CRYSTAL_SINK_END_GUARD;
 
       channel = get_channel_epoch_ta(epoch, n_ta);
 
@@ -392,7 +392,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
           0, // don't stop on sync
           CRYSTAL_TYPE_DATA, 
           0, // don't ignore type
-          t_phase_start, t_phase_stop, timer_handler, t, ptr);
+          t_slot_start, t_slot_stop, timer_handler, t, ptr);
 
       PT_YIELD(&pt);
       glossy_stop();
@@ -452,15 +452,15 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
       memcpy(buf.raw + sizeof(crystal_ack_hdr_t),
           payload, conf.plds_A);
 
-      t_phase_start = ref_time + PHASE_A_OFFS(n_ta);
-      t_phase_stop = t_phase_start + conf.w_A;
+      t_slot_start = t_ref + PHASE_A_OFFS(n_ta);
+      t_slot_stop = t_slot_start + conf.w_A;
 
       glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN,
           GLOSSY_INITIATOR, channel, CRYSTAL_SYNC_ACKS, conf.ntx_A,
           0, // don't stop on sync
           CRYSTAL_TYPE_ACK, 
           0, // don't ignore type
-          t_phase_start, t_phase_stop, timer_handler, t, ptr);
+          t_slot_start, t_slot_stop, timer_handler, t, ptr);
 
       PT_YIELD(&pt);
       glossy_stop();
@@ -475,11 +475,10 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
     cc2420_oscoff(); // put radio to deep sleep
 
-    ref_time += conf.period;
-    t_phase_start = ref_time;
+    t_ref += conf.period;
 
     // time to wake up to prepare for the next epoch
-    t_wakeup = t_phase_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
+    t_wakeup = t_ref - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
     rtimer_set(t, t_wakeup - CRYSTAL_APP_PRE_EPOCH_CB_TIME, timer_handler, ptr);
     app_epoch_end();
@@ -500,8 +499,8 @@ PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
   // Scanning loop
   while (1) {
     bzero(&glossy_S, sizeof(glossy_S)); // reset the Glossy timing info
-    t_phase_start = RTIMER_NOW() + (GLOSSY_PRE_TIME + 6); // + 6 is just to be sure
-    t_phase_stop = t_phase_start + CRYSTAL_SCAN_SLOT_DURATION;
+    t_slot_start = RTIMER_NOW() + (GLOSSY_PRE_TIME + 6); // + 6 is just to be sure
+    t_slot_stop = t_slot_start + CRYSTAL_SCAN_SLOT_DURATION;
 
     glossy_start(&glossy_S, buf.raw, 0 /* size is not specified */,
         GLOSSY_RECEIVER, channel, GLOSSY_SYNC, 5 /* N */,
@@ -509,7 +508,7 @@ PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
         0, // don't stop on sync
         0, // don't specify packet type
         1, // ignore type (receive anything)
-        t_phase_start, t_phase_stop, timer_handler, t, ptr);
+        t_slot_start, t_slot_stop, timer_handler, t, ptr);
     PT_YIELD(&pt_scan);
     glossy_stop();
 
@@ -525,7 +524,7 @@ PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
         crystal_info.epoch = epoch;
         n_ta = 0;
         if (IS_SYNCED()) {
-          corrected_ref_time = get_t_ref_l();
+          t_ref_corrected = get_t_ref_l();
           break; // exit the scanning
         }
         channel = get_channel_node_bootstrap(SCAN_RX_S);
@@ -540,7 +539,7 @@ PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
         n_ta = buf.ack_hdr.n_ta;
         
         if (IS_SYNCED()) {
-          corrected_ref_time = get_t_ref_l() - PHASE_A_OFFS(n_ta);
+          t_ref_corrected = get_t_ref_l() - PHASE_A_OFFS(n_ta);
           break; // exit the scanning
         }
         channel = get_channel_node_bootstrap(SCAN_RX_A);
@@ -579,7 +578,7 @@ PT_THREAD(pt_s_node_thread(struct rtimer *t, void* ptr))
       0, // don't stop on sync
       CRYSTAL_TYPE_SYNC, 
       0, // don't ignore type
-      t_phase_start, t_phase_stop, timer_handler, t, ptr);
+      t_s_start, t_s_stop, timer_handler, t, ptr);
 
   PT_YIELD(&pt_s_node);
   glossy_stop();
@@ -603,26 +602,25 @@ PT_THREAD(pt_s_node_thread(struct rtimer *t, void* ptr))
   if (IS_SYNCED() && rx_count_S > 0
       && correct_packet
       && correct_hops()) {
-    corrected_ref_time_s = get_t_ref_l();
-    corrected_ref_time = corrected_ref_time_s; // use this corrected ref time in the current epoch
+    t_ref_corrected_s = get_t_ref_l();
+    t_ref_corrected = t_ref_corrected_s; // use this corrected ref time in the current epoch
 
     if (ever_synced_with_s) {
       // can estimate skew
-      period_skew = (int16_t)(corrected_ref_time_s - (skewed_ref_time + conf.period)) / (sync_missed + 1);
+      period_skew = (int16_t)(t_ref_corrected_s - (t_ref_skewed + conf.period)) / ((int)sync_missed + 1); // cast to signed is required
       skew_estimated = 1;
     }
 
-    skewed_ref_time = corrected_ref_time_s;
+    t_ref_skewed = t_ref_corrected_s;
     ever_synced_with_s = 1;
     sync_missed = 0;
   }
   else {
     sync_missed++;
-    skewed_ref_time += conf.period;
-    corrected_ref_time = estimated_ref_time; // use the estimate if didn't update
-    corrected_ref_time_s = estimated_ref_time;
+    t_ref_skewed += conf.period;
+    t_ref_corrected = t_ref_estimated; // use the estimate if didn't update
+    t_ref_corrected_s = t_ref_estimated;
   }
-  //end_of_s_time = RTIMER_NOW()-ref_time; // just for debugging
 
   app_post_S(correct_packet, buf.raw + sizeof(crystal_sync_hdr_t));
   BZERO_BUF();
@@ -664,8 +662,8 @@ PT_THREAD(pt_ta_node_thread(struct rtimer *t, void* ptr))
       // guards for receiving
       guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
     }
-    t_phase_start = corrected_ref_time + PHASE_T_OFFS(n_ta) - CRYSTAL_REF_SHIFT - guard;
-    t_phase_stop = t_phase_start + conf.w_T + guard;
+    t_slot_start = t_ref_corrected + PHASE_T_OFFS(n_ta) - CRYSTAL_REF_SHIFT - guard;
+    t_slot_stop = t_slot_start + conf.w_T + guard;
 
     //choice of the channel for each T-A slot
     channel = get_channel_epoch_ta(epoch, n_ta);
@@ -675,7 +673,7 @@ PT_THREAD(pt_ta_node_thread(struct rtimer *t, void* ptr))
         0, // don't stop on sync
         CRYSTAL_TYPE_DATA, 
         0, // don't ignore type
-        t_phase_start, t_phase_stop, timer_handler, t, ptr);
+        t_slot_start, t_slot_stop, timer_handler, t, ptr);
 
     PT_YIELD(&pt_ta_node);
     glossy_stop();
@@ -711,15 +709,15 @@ PT_THREAD(pt_ta_node_thread(struct rtimer *t, void* ptr))
 
     correct_packet = 0;
     guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
-    t_phase_start = corrected_ref_time - guard + PHASE_A_OFFS(n_ta) - CRYSTAL_REF_SHIFT;
-    t_phase_stop = t_phase_start + conf.w_A + guard;
+    t_slot_start = t_ref_corrected - guard + PHASE_A_OFFS(n_ta) - CRYSTAL_REF_SHIFT;
+    t_slot_stop = t_slot_start + conf.w_A + guard;
 
     glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN, 
         GLOSSY_RECEIVER, channel, CRYSTAL_SYNC_ACKS, conf.ntx_A,
         0, // don't stop on sync
         CRYSTAL_TYPE_ACK, 
         0, // don't ignore type
-        t_phase_start, t_phase_stop, timer_handler, t, ptr);
+        t_slot_start, t_slot_stop, timer_handler, t, ptr);
 
     PT_YIELD(&pt_ta_node);
     glossy_stop();
@@ -747,7 +745,7 @@ PT_THREAD(pt_ta_node_thread(struct rtimer *t, void* ptr))
             && correct_ack_skew(N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta))
            ) {
 
-          corrected_ref_time = N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta);
+          t_ref_corrected = N_TA_TO_REF(get_t_ref_l(), buf.ack_hdr.n_ta);
           synced_with_ack ++;
           n_noack_epochs = 0; // it's important to reset it here to reenable TX right away (if it was suppressed)
         }
@@ -834,14 +832,14 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
   //PT_YIELD(&pt);
 
   now = RTIMER_NOW();
-  offs = now - (corrected_ref_time - CRYSTAL_REF_SHIFT) + 20; // 20 just to be sure
+  offs = now - (t_ref_corrected - CRYSTAL_REF_SHIFT) + 20; // 20 just to be sure
 
   if (offs + CRYSTAL_INIT_GUARD + OSC_STAB_TIME + GLOSSY_PRE_TIME > conf.period) {
     // We are that late so the next epoch started
     // (for sure this will not work with period of 2s)
     epoch ++;
     crystal_info.epoch = epoch;
-    corrected_ref_time += conf.period;
+    t_ref_corrected += conf.period;
     if (offs > conf.period) // safe to subtract 
       offs -= conf.period;
     else // avoid wrapping around 0
@@ -871,13 +869,13 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
   }
 
   // here we have the ref time pointing at the previous epoch
-  corrected_ref_time_s = corrected_ref_time;
+  t_ref_corrected_s = t_ref_corrected;
 
   /* For S if we are not skipping it */
-  estimated_ref_time = corrected_ref_time + conf.period;
-  skewed_ref_time = estimated_ref_time;
-  t_phase_start = estimated_ref_time - CRYSTAL_REF_SHIFT - CRYSTAL_INIT_GUARD;
-  t_phase_stop = t_phase_start + conf.w_S + 2*CRYSTAL_INIT_GUARD; 
+  t_ref_estimated = t_ref_corrected + conf.period;
+  t_ref_skewed = t_ref_estimated;
+  t_s_start = t_ref_estimated - CRYSTAL_REF_SHIFT - CRYSTAL_INIT_GUARD;
+  t_s_stop = t_s_start + conf.w_S + 2*CRYSTAL_INIT_GUARD; 
 
   while (1) {
     init_epoch_state();
@@ -890,7 +888,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
       app_pre_S();
 
       // wait for the oscillator to stabilize
-      rtimer_set(t, t_phase_start - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
+      rtimer_set(t, t_s_start - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
       PT_YIELD(&pt);
 
       epoch ++;
@@ -909,13 +907,13 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
     s_guard = (!skew_estimated || sync_missed >= N_MISSED_FOR_INIT_GUARD)?CRYSTAL_INIT_GUARD:CRYSTAL_LONG_GUARD;
 
-    // Schedule begin of next Glossy phase based on S reference time
-    estimated_ref_time = corrected_ref_time_s + conf.period + period_skew;
-    t_phase_start = estimated_ref_time - CRYSTAL_REF_SHIFT - s_guard;
-    t_phase_stop = t_phase_start + conf.w_S + 2*s_guard;
+    // Schedule the next epoch times
+    t_ref_estimated = t_ref_corrected_s + conf.period + period_skew;
+    t_s_start = t_ref_estimated - CRYSTAL_REF_SHIFT - s_guard;
+    t_s_stop = t_s_start + conf.w_S + 2*s_guard;
 
     // time to wake up to prepare for the next epoch
-    t_wakeup = t_phase_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
+    t_wakeup = t_s_start - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
     rtimer_set(t, t_wakeup - CRYSTAL_APP_PRE_EPOCH_CB_TIME, timer_handler, ptr);
     app_epoch_end();
@@ -991,7 +989,7 @@ void crystal_print_epoch_logs() {
 
   if (!conf.is_sink) {
     printf("S %u:%u %u %u:%u %d %u\n", epoch, n_ta_tx, n_all_acks, synced_with_ack, sync_missed, period_skew, hopcount);
-    printf("P %u:%u %u %u:%u %u %u %d:%ld\n", epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, ack_skew_err, end_of_s_time);
+    printf("P %u:%u %u %u:%u %u %u %d:%ld\n", epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, ack_skew_err, 0);
   }
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
