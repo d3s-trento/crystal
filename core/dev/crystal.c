@@ -140,12 +140,14 @@ static int log_noise;
 static uint16_t noise_scan_channel;
 static inline void measure_noise();
 
-#define TA_DURATION (conf.w_T+conf.w_A+2*CRYSTAL_INTER_PHASE_GAP)
 
 // it's important to wait the maximum possible S phase duration before starting the TAs!
-#define TAS_START_OFFS (CRYSTAL_INIT_GUARD*2 + conf.w_S + CRYSTAL_INTER_PHASE_GAP)
-#define PHASE_T_OFFS(n) (TAS_START_OFFS + (n)*TA_DURATION)
-#define PHASE_A_OFFS(n) (PHASE_T_OFFS(n) + (conf.w_T + CRYSTAL_INTER_PHASE_GAP))
+#define PHASE_S_END_OFFS (CRYSTAL_INIT_GUARD*2 + conf.w_S + CRYSTAL_INTER_PHASE_GAP)
+#define TAS_START_OFFS   (PHASE_S_END_OFFS + CRYSTAL_INTER_PHASE_GAP)
+#define TA_DURATION      (conf.w_T+conf.w_A+2*CRYSTAL_INTER_PHASE_GAP)
+#define PHASE_T_OFFS(n)  (TAS_START_OFFS + (n)*TA_DURATION)
+#define PHASE_A_OFFS(n)  (PHASE_T_OFFS(n) + (conf.w_T + CRYSTAL_INTER_PHASE_GAP))
+
 #define CRYSTAL_MAX_ACTIVE_TIME (conf.period - CRYSTAL_TIME_FOR_APP - CRYSTAL_APP_PRE_EPOCH_CB_TIME - CRYSTAL_INIT_GUARD - CRYSTAL_INTER_PHASE_GAP - 100)
 #define CRYSTAL_MAX_TAS (((unsigned int)(CRYSTAL_MAX_ACTIVE_TIME - TAS_START_OFFS))/(TA_DURATION))
 
@@ -491,7 +493,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
   PT_END(&pt);
 }
 
-PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
+PT_THREAD(scan_thread(struct rtimer *t, void* ptr))
 {
   PT_BEGIN(&pt_scan);
   channel = get_channel_node_bootstrap(SCAN_RX_NOTHING);
@@ -565,7 +567,7 @@ PT_THREAD(pt_scan_thread(struct rtimer *t, void* ptr))
 }
 
 
-PT_THREAD(pt_s_node_thread(struct rtimer *t, void* ptr))
+PT_THREAD(s_node_thread(struct rtimer *t, void* ptr))
 {
   static uint16_t ever_synced_with_s;   // Synchronized with an S at least once
   PT_BEGIN(&pt_s_node);
@@ -632,7 +634,7 @@ PT_THREAD(pt_s_node_thread(struct rtimer *t, void* ptr))
   PT_END(&pt_s_node);
 }
 
-PT_THREAD(pt_ta_node_thread(struct rtimer *t, void* ptr))
+PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
 {
   PT_BEGIN(&pt_ta_node);
 
@@ -821,7 +823,7 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
   static uint16_t starting_n_ta; // the first TA index in an epoch (if joining in the middle of TA chain)
   PT_BEGIN(&pt);
 
-  PT_SPAWN(&pt, &pt_scan, pt_scan_thread(t, ptr));
+  PT_SPAWN(&pt, &pt_scan, scan_thread(t, ptr));
 
   app_crystal_start_done(true);
   BZERO_BUF();
@@ -893,12 +895,12 @@ static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
 
       epoch ++;
       crystal_info.epoch = epoch;
-      PT_SPAWN(&pt, &pt_s_node, pt_s_node_thread(t, ptr));
+      PT_SPAWN(&pt, &pt_s_node, s_node_thread(t, ptr));
     }
     skip_S = 0;
     n_ta = starting_n_ta;
 
-    PT_SPAWN(&pt, &pt_ta_node, pt_ta_node_thread(t, ptr));
+    PT_SPAWN(&pt, &pt_ta_node, ta_node_thread(t, ptr));
 
     if (!synced_with_ack) {
       n_noack_epochs ++;
