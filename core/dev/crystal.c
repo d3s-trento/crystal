@@ -81,7 +81,10 @@ static uint8_t* payload;              // application payload pointer for the cur
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy object to be used in different phases
 
 static struct rtimer rt;              // Rtimer used to schedule Crystal
+static rtimer_callback_t timer_handler;
 static struct pt pt;                  // Main protothread of Crystal
+static struct pt pt_s_root;           // Protothread for S phase (root)
+static struct pt pt_ta_root;          // Protothread for TA pair (root)
 static struct pt pt_scan;             // Protothread for scanning the channel
 static struct pt pt_s_node;           // Protothread for S phase (non-root)
 static struct pt pt_ta_node;          // Protothread for TA pair (non-root)
@@ -95,6 +98,8 @@ static uint16_t sync_missed = 0;      // Current number of consecutive S phases 
 
 static uint16_t skew_estimated;          // Not zero if the clock skew over a period of length CRYSTAL_PERIOD has already been estimated.
 static int      period_skew;             // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
+
+static rtimer_clock_t t_ref_root;            // epoch reference time (only for root)
 
 static rtimer_clock_t t_ref_estimated;            // estimated reference time for the current epoch
 static rtimer_clock_t t_ref_corrected_s;          // reference time acquired during the S slot of the current epoch
@@ -317,72 +322,52 @@ static inline void init_epoch_state() { // zero out epoch-related variables
   synced_with_ack = 0;
 }
 
+PT_THREAD(s_root_thread(struct rtimer *t, void* ptr))
+{
 
-static rtimer_callback_t timer_handler;
+  PT_BEGIN(&pt_s_root);
+  // -- Phase S (root) ----------------------------------------------------------------- S (root) ---
+  buf.sync_hdr.epoch = epoch;
+  buf.sync_hdr.src   = node_id;
 
-static char sink_timer_handler(struct rtimer *t, void *ptr) {
-  static rtimer_clock_t t_ref;
-  PT_BEGIN(&pt);
+  if (payload) {
+    memcpy(buf.raw + sizeof(crystal_sync_hdr_t),
+        payload, conf.plds_S);
+  }
 
-  app_crystal_start_done(true);
+  channel = get_channel_epoch(epoch);
 
-  //leds_off(LEDS_RED);
-  t_ref = RTIMER_NOW() + OSC_STAB_TIME + GLOSSY_PRE_TIME + 16; // + 16 just to be sure
-  while (1) {
-    init_epoch_state();
+  glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
+      GLOSSY_INITIATOR, channel, GLOSSY_SYNC, conf.ntx_S,
+      0, // don't stop on sync
+      CRYSTAL_TYPE_SYNC, 
+      0, // don't ignore type
+      t_s_start, t_s_stop + conf.w_S, timer_handler, t, ptr);
+  // Yield the protothread. It will be resumed when Glossy terminates.
+  PT_YIELD(&pt_s_root);
 
-    // -- Phase S (root) ----------------------------------------------------------------- S (root) ---
+  glossy_stop();
+  //leds_off(LEDS_BLUE);
+  UPDATE_SLOT_STATS(S, 1);
+  tx_count_S = get_tx_cnt();
+  rx_count_S = get_rx_cnt();
 
-    cc2420_oscon();
+  app_post_S(0, NULL);
+  BZERO_BUF();
+  // -- Phase S end (root) --------------------------------------------------------- S end (root) ---
+  PT_END(&pt_s_root);
+}
 
-    crystal_info.n_ta = 0;
-    payload = app_pre_S();
 
-    t_s_start = t_ref;
-    t_s_stop = t_s_start + conf.w_S;
-
-    // wait for the oscillator to stabilize
-    rtimer_set(t, t_ref - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
-    PT_YIELD(&pt);
-
-    epoch ++;
-    crystal_info.epoch = epoch;
-
-    buf.sync_hdr.epoch = epoch;
-    buf.sync_hdr.src   = node_id;
-
-    if (payload) {
-      memcpy(buf.raw + sizeof(crystal_sync_hdr_t),
-          payload, conf.plds_S);
-    }
-
-    channel = get_channel_epoch(epoch);
-
-    glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
-        GLOSSY_INITIATOR, channel, GLOSSY_SYNC, conf.ntx_S,
-        0, // don't stop on sync
-        CRYSTAL_TYPE_SYNC, 
-        0, // don't ignore type
-        t_s_start, t_s_stop + conf.w_S, timer_handler, t, ptr);
-    // Yield the protothread. It will be resumed when Glossy terminates.
-    PT_YIELD(&pt);
-
-    glossy_stop();
-    //leds_off(LEDS_BLUE);
-    UPDATE_SLOT_STATS(S, 1);
-    tx_count_S = get_tx_cnt();
-    rx_count_S = get_rx_cnt();
-
-    app_post_S(0, NULL);
-    BZERO_BUF();
-    // -- Phase S end (root) --------------------------------------------------------- S end (root) ---
-
+PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
+{
+  PT_BEGIN(&pt_ta_root);
     while (!sleep_order && n_ta < CRYSTAL_MAX_TAS) { /* TA loop */
       init_ta_log_vars();
       crystal_info.n_ta = n_ta;
 
       // -- Phase T (root) ----------------------------------------------------------------- T (root) ---
-      t_slot_start = t_ref - CRYSTAL_SHORT_GUARD + PHASE_T_OFFS(n_ta);
+      t_slot_start = t_ref_root - CRYSTAL_SHORT_GUARD + PHASE_T_OFFS(n_ta);
       t_slot_stop = t_slot_start + conf.w_T + CRYSTAL_SHORT_GUARD + CRYSTAL_SINK_END_GUARD;
 
       channel = get_channel_epoch_ta(epoch, n_ta);
@@ -396,7 +381,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
           0, // don't ignore type
           t_slot_start, t_slot_stop, timer_handler, t, ptr);
 
-      PT_YIELD(&pt);
+      PT_YIELD(&pt_ta_root);
       glossy_stop();
 
       UPDATE_SLOT_STATS(T, 0);
@@ -454,7 +439,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
       memcpy(buf.raw + sizeof(crystal_ack_hdr_t),
           payload, conf.plds_A);
 
-      t_slot_start = t_ref + PHASE_A_OFFS(n_ta);
+      t_slot_start = t_ref_root + PHASE_A_OFFS(n_ta);
       t_slot_stop = t_slot_start + conf.w_A;
 
       glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN,
@@ -464,7 +449,7 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
           0, // don't ignore type
           t_slot_start, t_slot_stop, timer_handler, t, ptr);
 
-      PT_YIELD(&pt);
+      PT_YIELD(&pt_ta_root);
       glossy_stop();
 
       UPDATE_SLOT_STATS(A, 1);
@@ -474,13 +459,46 @@ static char sink_timer_handler(struct rtimer *t, void *ptr) {
 
       n_ta ++;
     } /* End of TA loop */
+  PT_END(&pt_ta_root);
+}
+
+
+static char root_main_thread(struct rtimer *t, void *ptr) {
+  PT_BEGIN(&pt);
+
+  app_crystal_start_done(true);
+
+  //leds_off(LEDS_RED);
+  t_ref_root = RTIMER_NOW() + OSC_STAB_TIME + GLOSSY_PRE_TIME + 16; // + 16 just to be sure
+  while (1) {
+    init_epoch_state();
+
+
+    cc2420_oscon();
+
+    crystal_info.n_ta = 0;
+    payload = app_pre_S();
+
+    t_s_start = t_ref_root;
+    t_s_stop = t_s_start + conf.w_S;
+
+    // wait for the oscillator to stabilize
+    rtimer_set(t, t_ref_root - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
+    PT_YIELD(&pt);
+
+    epoch ++;
+    crystal_info.epoch = epoch;
+
+    PT_SPAWN(&pt, &pt_s_root, s_root_thread(t, ptr));
+
+    PT_SPAWN(&pt, &pt_ta_root, ta_root_thread(t, ptr));
 
     cc2420_oscoff(); // put radio to deep sleep
 
-    t_ref += conf.period;
+    t_ref_root += conf.period;
 
     // time to wake up to prepare for the next epoch
-    t_wakeup = t_ref - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
+    t_wakeup = t_ref_root - (OSC_STAB_TIME + GLOSSY_PRE_TIME + CRYSTAL_INTER_PHASE_GAP);
 
     rtimer_set(t, t_wakeup - CRYSTAL_APP_PRE_EPOCH_CB_TIME, timer_handler, ptr);
     app_epoch_end();
@@ -815,7 +833,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
 }
 
 
-static char nonsink_timer_handler(struct rtimer *t, void *ptr) {
+static char node_main_thread(struct rtimer *t, void *ptr) {
   static rtimer_clock_t s_guard;
   static rtimer_clock_t now;
   static rtimer_clock_t offs;
@@ -961,9 +979,9 @@ bool crystal_start(crystal_config_t* conf_)
   //PRINT_CRYSTAL_CONFIG(conf);
 
   if (conf.is_sink)
-    timer_handler = sink_timer_handler;
+    timer_handler = root_main_thread;
   else
-    timer_handler = nonsink_timer_handler;
+    timer_handler = node_main_thread;
 
   //leds_on(LEDS_RED);
 
