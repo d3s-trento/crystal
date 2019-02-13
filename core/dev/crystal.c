@@ -322,11 +322,10 @@ static inline void init_epoch_state() { // zero out epoch-related variables
   synced_with_ack = 0;
 }
 
-PT_THREAD(s_root_thread(struct rtimer *t, void* ptr))
+// ------------------------------------------------------------------------------------------------- S thread (root) ---
+PT_THREAD(s_root_thread(struct rtimer *t, void* ptr)) 
 {
-
   PT_BEGIN(&pt_s_root);
-  // -- Phase S (root) ----------------------------------------------------------------- S (root) ---
   buf.sync_hdr.epoch = epoch;
   buf.sync_hdr.src   = node_id;
 
@@ -354,11 +353,11 @@ PT_THREAD(s_root_thread(struct rtimer *t, void* ptr))
 
   app_post_S(0, NULL);
   BZERO_BUF();
-  // -- Phase S end (root) --------------------------------------------------------- S end (root) ---
   PT_END(&pt_s_root);
 }
 
 
+// ------------------------------------------------------------------------------------------------ TA thread (root) ---
 PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
 {
   PT_BEGIN(&pt_ta_root);
@@ -366,7 +365,7 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
       init_ta_log_vars();
       crystal_info.n_ta = n_ta;
 
-      // -- Phase T (root) ----------------------------------------------------------------- T (root) ---
+      // -- Phase T (root)
       t_slot_start = t_ref_root - CRYSTAL_SHORT_GUARD + PHASE_T_OFFS(n_ta);
       t_slot_stop = t_slot_start + conf.w_T + CRYSTAL_SHORT_GUARD + CRYSTAL_SINK_END_GUARD;
 
@@ -420,14 +419,14 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
       payload = app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
       log_ta(0);
       BZERO_BUF();
-      // -- Phase T end (root) --------------------------------------------------------- T end (root) ---
+      // -- Phase T end (root)
       sleep_order = 
         epoch >= CRYSTAL_N_FULL_EPOCHS && (
           (n_ta         >= CRYSTAL_MAX_TAS-1) || 
           (n_empty_ts   >= CRYSTAL_SINK_MAX_EMPTY_TS_DYNAMIC(n_ta)) || 
           (conf.x && n_high_noise >= conf.x)// && (n_high_noise >= CRYSTAL_SINK_MAX_EMPTY_TS_DYNAMIC(n_ta))
           );
-      // -- Phase A (root) ----------------------------------------------------------------- A (root) ---
+      // -- Phase A (root)
 
       if (sleep_order)
         CRYSTAL_SET_ACK_SLEEP(buf.ack_hdr);
@@ -455,7 +454,7 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
       UPDATE_SLOT_STATS(A, 1);
       app_post_A(0, buf.raw + sizeof(crystal_ack_hdr_t));
       BZERO_BUF();
-      // -- Phase A end (root) --------------------------------------------------------- A end (root) ---
+      // -- Phase A end (root)
 
       n_ta ++;
     } /* End of TA loop */
@@ -463,6 +462,7 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
 }
 
 
+// ---------------------------------------------------------------------------------------------- Main thread (root) ---
 static char root_main_thread(struct rtimer *t, void *ptr) {
   PT_BEGIN(&pt);
 
@@ -511,6 +511,7 @@ static char root_main_thread(struct rtimer *t, void *ptr) {
   PT_END(&pt);
 }
 
+// ---------------------------------------------------------------------------------------------- Scan thread (node) ---
 PT_THREAD(scan_thread(struct rtimer *t, void* ptr))
 {
   PT_BEGIN(&pt_scan);
@@ -585,12 +586,12 @@ PT_THREAD(scan_thread(struct rtimer *t, void* ptr))
 }
 
 
+// ------------------------------------------------------------------------------------------------- S thread (node) ---
 PT_THREAD(s_node_thread(struct rtimer *t, void* ptr))
 {
   static uint16_t ever_synced_with_s;   // Synchronized with an S at least once
   PT_BEGIN(&pt_s_node);
   
-  // -- Phase S (non-root) --------------------------------------------------------- S (non-root) ---
   channel = get_channel_epoch(epoch);
 
   glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
@@ -648,17 +649,17 @@ PT_THREAD(s_node_thread(struct rtimer *t, void* ptr))
 
   crystal_info.hops = hopcount;
   crystal_info.n_missed_s = sync_missed;
-  // -- Phase S end (non-root) ------------------------------------------------- S end (non-root) ---
   PT_END(&pt_s_node);
 }
 
+// ------------------------------------------------------------------------------------------------ TA thread (node) ---
 PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
 {
   PT_BEGIN(&pt_ta_node);
 
   while (1) { /* TA loop */
     crystal_info.n_ta = n_ta;
-    // -- Phase T (non-root) --------------------------------------------------------- T (non-root) ---
+    // -- Phase T (non-root)
     static int guard;
     static uint16_t have_packet;
     static int i_tx;
@@ -723,9 +724,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
 
     BZERO_BUF();
 
-    // -- Phase T end (non-root) ------------------------------------------------- T end (non-root) ---
-
-    // -- Phase A (non-root) --------------------------------------------------------- A (non-root) ---
+    // -- Phase A (non-root)
 
     correct_packet = 0;
     guard = (sync_missed && !synced_with_ack)?CRYSTAL_SHORT_GUARD_NOSYNC:CRYSTAL_SHORT_GUARD;
@@ -814,7 +813,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
     log_ta(i_tx);
 
     BZERO_BUF();
-    // -- Phase A end (non-root) ------------------------------------------------- A end (non-root) ---
+    // -- Phase A end
     n_ta ++;
     // shall we stop?
     if (sleep_order || (n_ta >= CRYSTAL_MAX_TAS) || // always stop when ordered or max is reached
@@ -833,6 +832,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
 }
 
 
+// ---------------------------------------------------------------------------------------------- Main thread (node) ---
 static char node_main_thread(struct rtimer *t, void *ptr) {
   static rtimer_clock_t s_guard;
   static rtimer_clock_t now;
@@ -950,6 +950,7 @@ static char node_main_thread(struct rtimer *t, void *ptr) {
   PT_END(&pt);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
 void crystal_init() {
   cc2420_set_channel(CRYSTAL_DEF_CHANNEL);
 }
