@@ -73,43 +73,44 @@ static crystal_config_t conf = {
   .scan_duration = 0xFF,
 };
 
-crystal_info_t crystal_info;          // public read-only status information about Crystal
-crystal_app_log_t crystal_app_log;
+crystal_info_t crystal_info;        // public read-only status information about Crystal
+crystal_app_log_t crystal_app_log;  // public writeable structure for app info in Crystal logs
 
-static uint8_t* payload;              // application payload pointer for the current slot
+static uint8_t* payload;            // application payload pointer for the current slot
 
-static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy object to be used in different phases
+static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy objects for different phases
 
-static struct rtimer rt;              // Rtimer used to schedule Crystal
-static rtimer_callback_t timer_handler;
-static struct pt pt;                  // Main protothread of Crystal
-static struct pt pt_s_root;           // Protothread for S phase (root)
-static struct pt pt_ta_root;          // Protothread for TA pair (root)
-static struct pt pt_scan;             // Protothread for scanning the channel
-static struct pt pt_s_node;           // Protothread for S phase (non-root)
-static struct pt pt_ta_node;          // Protothread for TA pair (non-root)
+static struct rtimer rt;                // Rtimer used to schedule Crystal
+static rtimer_callback_t timer_handler; // Pointer to the main thread function (either root or node)
 
-static crystal_epoch_t epoch;         // epoch seqn received from the sink (or extrapolated)
-static uint8_t channel;               // current channel
+static struct pt pt;              // Main protothread of Crystal
+static struct pt pt_s_root;       // Protothread for S phase (root)
+static struct pt pt_ta_root;      // Protothread for TA pair (root)
+static struct pt pt_scan;         // Protothread for scanning the channel
+static struct pt pt_s_node;       // Protothread for S phase (non-root)
+static struct pt pt_ta_node;      // Protothread for TA pair (non-root)
 
-static uint16_t synced_with_ack;      // Synchronized with an acknowledgement (A phase)
-static uint16_t n_noack_epochs;       // Number of consecutive epochs the node did not synchronize with any acknowledgement
-static uint16_t sync_missed = 0;      // Current number of consecutive S phases without synchronization (reference time not computed)
+static crystal_epoch_t epoch;     // epoch seqn received from the sink (or extrapolated)
+static uint8_t channel;           // current channel
 
-static uint16_t skew_estimated;          // Not zero if the clock skew over a period of length CRYSTAL_PERIOD has already been estimated.
-static int      period_skew;             // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
+static uint16_t synced_with_ack;  // Synchronized with an acknowledgement (A phase)
+static uint16_t n_noack_epochs;   // Number of consecutive epochs the node did not synchronize with any acknowledgement
+static uint16_t sync_missed = 0;  // Current number of consecutive S phases without synchronization (reference time not computed)
 
-static rtimer_clock_t t_ref_root;            // epoch reference time (only for root)
+static uint16_t skew_estimated;   // Not zero if the clock skew over a period of length CRYSTAL_PERIOD has already been estimated.
+static int      period_skew;      // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
 
-static rtimer_clock_t t_ref_estimated;            // estimated reference time for the current epoch
-static rtimer_clock_t t_ref_corrected_s;          // reference time acquired during the S slot of the current epoch
-static rtimer_clock_t t_ref_corrected;            // reference time acquired during the S or an A slot of the current epoch
-static rtimer_clock_t t_ref_skewed;               // reference time in the local time frame
-static rtimer_clock_t t_wakeup;                   // Time to wake up to prepare for the next epoch
+static rtimer_clock_t t_ref_root;        // epoch reference time (only for root)
+static rtimer_clock_t t_ref_estimated;   // estimated reference time for the current epoch
+static rtimer_clock_t t_ref_corrected_s; // reference time acquired during the S slot of the current epoch
+static rtimer_clock_t t_ref_corrected;   // reference time acquired during the S or an A slot of the current epoch
+static rtimer_clock_t t_ref_skewed;      // reference time in the local time frame
+static rtimer_clock_t t_wakeup;          // Time to wake up to prepare for the next epoch
 static rtimer_clock_t t_s_start, t_s_stop;        // Start/stop times for S slots
 static rtimer_clock_t t_slot_start, t_slot_stop;  // Start/stop times for T and A slots
 
 static uint16_t correct_packet; // whether the received packet is correct
+static uint16_t sleep_order;    // sink sent the sleep command
 
 static uint16_t n_ta;         // the current TA index in the epoch
 static uint16_t n_ta_tx;      // how many times node tried to send data in the epoch
@@ -118,30 +119,28 @@ static uint16_t n_high_noise; // number of consecutive "T" phases with high nois
 static uint16_t n_noacks;     // num. of consecutive "A" phases without any acks
 static uint16_t n_bad_acks;   // num. of consecutive "A" phases with bad acks
 static uint16_t n_all_acks;   // num. of negative and positive acks
-static uint16_t sleep_order;  // sink sent the sleep command
 static uint16_t n_badtype_A;  // num. of packets of wrong type received in A phase
 static uint16_t n_badlen_A;   // num. of packets of wrong length received in A phase
 static uint16_t n_badcrc_A;   // num. of packets with wrong CRC received in A phase
 static uint16_t recvtype_S;   // type of a packet received in S phase
 static uint16_t recvlen_S;    // length of a packet received in S phase
 static uint16_t recvsrc_S;    // source address of a packet received in S phase
+static uint16_t cca_busy_cnt; // noise detector value
 
-static uint16_t ack_skew_err;  // "wrong" ACK skew
 static uint16_t hopcount;
 static uint16_t rx_count_S, tx_count_S;  // tx and rx counters for S phase as reported by Glossy
 static uint16_t rx_count_T;
 static uint16_t rx_count_A;
-static uint16_t ton_S, ton_T, ton_A;     // actual duration of the phases
-static uint16_t tf_S, tf_T, tf_A;        // actual duration of the phases when all N packets are received
+static uint16_t ton_S, ton_T, ton_A;     // total duration of the phases in the current epoch
+static uint16_t tf_S, tf_T, tf_A;        // total duration of the phases when all N packets are received
 static uint16_t n_short_S, n_short_T, n_short_A; // number of "complete" S, T and A phases (those counted in tf_S, tf_T and tf_A)
-static uint16_t cca_busy_cnt;
 
-// info about current TA
+// info about current TA (for logging)
 static uint16_t log_recv_type;
 static uint16_t log_recv_length;
 static uint16_t log_ta_status;
-
-static int log_noise;
+static int      log_noise;
+static uint16_t log_ack_skew_err;  // ACK skew estimation outlier
 static uint16_t noise_scan_channel;
 static inline void measure_noise();
 
@@ -243,20 +242,6 @@ static inline void log_ta(int tx) {
 } while(0)
 
 
-//#if PRINT_GRAZ
-#if 0
-#define PRINT_BUF_SIZE 50
-static char print_buf[PRINT_BUF_SIZE];
-#define PRINTF(format, ...) do {\
-  snprintf(print_buf, PRINT_BUF_SIZE, format "\n\n\n\n", __VA_ARGS__);\
-  printf(print_buf);\
-  clock_delay(300);\
-  printf(print_buf);\
-} while(0)
-#else
-#define PRINTF(format, ...) printf(format, __VA_ARGS__)
-#endif
-
 
 #include "crystal-chseq.c"
 
@@ -294,8 +279,8 @@ static inline int correct_ack_skew(rtimer_clock_t new_ref) {
     return 1;  // the skew is big but we did not synchronise during the current epoch, so probably it is fine
   }
   else {
+    log_ack_skew_err = new_skew;
     // signal error (0) only if not synchronised with S or another A in the current epoch.
-    ack_skew_err = new_skew;
     return 0;
   }
 #else
@@ -308,7 +293,7 @@ static inline void init_epoch_state() { // zero out epoch-related variables
   n_short_S = 0; n_short_T = 0; n_short_A = 0;
   ton_S = 0; ton_T = 0; ton_A = 0;
   n_badlen_A = 0; n_badtype_A = 0; n_badcrc_A = 0;
-  ack_skew_err = 0;
+  log_ack_skew_err = 0;
   cca_busy_cnt = 0;
 
   n_empty_ts = 0;
@@ -473,21 +458,19 @@ static char root_main_thread(struct rtimer *t, void *ptr) {
   while (1) {
     init_epoch_state();
 
-
     cc2420_oscon();
 
+    epoch ++;
+    crystal_info.epoch = epoch;
     crystal_info.n_ta = 0;
-    payload = app_pre_S();
 
+    payload = app_pre_S();
     t_s_start = t_ref_root;
     t_s_stop = t_s_start + conf.w_S;
 
     // wait for the oscillator to stabilize
     rtimer_set(t, t_ref_root - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
     PT_YIELD(&pt);
-
-    epoch ++;
-    crystal_info.epoch = epoch;
 
     PT_SPAWN(&pt, &pt_s_root, s_root_thread(t, ptr));
 
@@ -902,8 +885,10 @@ static char node_main_thread(struct rtimer *t, void *ptr) {
     crystal_info.n_ta = 0;
 
     if (!skip_S) {
-      starting_n_ta = 0;
       cc2420_oscon();
+      epoch ++;
+      crystal_info.epoch = epoch;
+      starting_n_ta = 0;
 
       app_pre_S();
 
@@ -911,8 +896,6 @@ static char node_main_thread(struct rtimer *t, void *ptr) {
       rtimer_set(t, t_s_start - (GLOSSY_PRE_TIME + 16), timer_handler, ptr);
       PT_YIELD(&pt);
 
-      epoch ++;
-      crystal_info.epoch = epoch;
       PT_SPAWN(&pt, &pt_s_node, s_node_thread(t, ptr));
     }
     skip_S = 0;
@@ -1001,6 +984,27 @@ void crystal_stop() {
   /* TODO */
 }
 
+crystal_config_t crystal_get_config() {
+  return conf;
+}
+
+
+
+// ------------------------------------------------------------------------------------------------------ Log output ---
+//#if PRINT_GRAZ
+#if 0
+#define PRINT_BUF_SIZE 50
+static char print_buf[PRINT_BUF_SIZE];
+#define PRINTF(format, ...) do {\
+  snprintf(print_buf, PRINT_BUF_SIZE, format "\n\n\n\n", __VA_ARGS__);\
+  printf(print_buf);\
+  clock_delay(300);\
+  printf(print_buf);\
+} while(0)
+#else
+#define PRINTF(format, ...) printf(format, __VA_ARGS__)
+#endif
+
 void crystal_print_epoch_logs() {
   static int first_time = 1;
   unsigned long avg_radio_on;
@@ -1010,14 +1014,17 @@ void crystal_print_epoch_logs() {
 
   if (!conf.is_sink) {
     printf("S %u:%u %u %u:%u %d %u\n", epoch, n_ta_tx, n_all_acks, synced_with_ack, sync_missed, period_skew, hopcount);
-    printf("P %u:%u %u %u:%u %u %u %d:%ld\n", epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, ack_skew_err, 0);
+    printf("P %u:%u %u %u:%u %u %u %d:%ld\n", 
+        epoch, recvsrc_S, recvtype_S, recvlen_S, n_badtype_A, n_badlen_A, n_badcrc_A, log_ack_skew_err, 0);
   }
 
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
   static int i;
-  printf("R %u:%u %u:%d %u:%u %u %u\n", epoch, n_ta, n_rec_ta, log_noise, noise_scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
+  printf("R %u:%u %u:%d %u:%u %u %u\n", 
+      epoch, n_ta, n_rec_ta, log_noise, noise_scan_channel, tx_count_S, rx_count_S, cca_busy_cnt);
   for (i=0; i<n_rec_ta; i++) {
-    printf("T %u:%u %u:%u %u %u %u:%u %u %u\n", epoch,
+    printf("T %u:%u %u:%u %u %u %u:%u %u %u\n", 
+        epoch,
         ta_log[i].n_ta,
         ta_log[i].status,
         
@@ -1029,7 +1036,6 @@ void crystal_print_epoch_logs() {
         ta_log[i].t_rx_count,
         ta_log[i].a_rx_count,
         ta_log[i].acked
-        
         );
   }
   n_rec_ta = 0;
@@ -1056,11 +1062,6 @@ void crystal_print_epoch_logs() {
   energest_init();
   first_time = 0;
 #endif /* ENERGEST_CONF_ON */
-}
-
-
-crystal_config_t crystal_get_config() {
-  return conf;
 }
 
 
