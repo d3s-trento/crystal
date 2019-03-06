@@ -326,7 +326,7 @@ PT_THREAD(s_root_thread(struct rtimer *t, void* ptr))
       0, // don't stop on sync
       CRYSTAL_TYPE_SYNC, 
       0, // don't ignore type
-      t_s_start, t_s_stop + conf.w_S, timer_handler, t, ptr);
+      t_s_start, t_s_stop, timer_handler, t, ptr);
   // Yield the protothread. It will be resumed when Glossy terminates.
   PT_YIELD(&pt_s_root);
 
