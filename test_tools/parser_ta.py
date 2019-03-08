@@ -24,7 +24,7 @@ record_pattern = {
         "indriya":"^%s\s+[0-9-]+\s+[0-9:]+\s40(?P<self_id>\d+)\s+(?P<time>\d+)\s+\d+$", # Indriya Motelab
         "twist":"^(?P<time>\d+[.]\d+)\s+(?P<self_id>\d+)\s+%s", # TWIST testbed
         "flocklab":"^(?P<time>\d+[.]\d+)[,][0-9]+[,](?P<self_id>\d+)[,][a-z][,]%s$", # FlockLab Testbed
-        "unitn":"^(?P<time>.{23}) INFO - (?P<self_id>\d+) < b'%s'$"
+        "unitn":"^\[(?P<time>.{23})\] INFO:serial\.\d+: (?P<self_id>\d+) < b'%s'$"
         }.get(record_format, None)
 
 fname_pattern = re.compile("log_(?P<self_id>\d+).txt")
