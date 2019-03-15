@@ -42,7 +42,7 @@ setNames(aggregate(node ~ epoch, start_epoch, FUN=length), c("epoch", "n_nodes")
 message("Max starting epoch: ", max(start_epoch$epoch))
 
 #SKIP_END_EPOCHS = 30
-SKIP_END_EPOCHS = 1
+SKIP_END_EPOCHS = 10
 message("SKIPPING last ", SKIP_END_EPOCHS, " epochs!")
 
 min_epoch = max(c(params$start_epoch, min(rsum$epoch))+1)
@@ -109,15 +109,45 @@ message("Duplicates: ", sum(duplicates))
 sink_recv_nodup = sink_recv[!duplicates,]
 sink_rsum = rsum[rsum$dst==SINK,]
 
-sendrecv = merge(asend[,c("src", "seqn", "epoch")], sink_recv_nodup[,c("src", "seqn", "epoch", "n_ta")], by=c("src", "seqn"), all.x=T, suffixes=c(".tx", ".rx"))
-total_sent = dim(unique(send[c("src", "seqn")]))[1]
-total_packets = dim(asend)[1]
-nodups_recv = dim(sendrecv[!is.na(sendrecv$epoch.rx),])[1] # in sendrecv we don't have packets "received but not sent"
+# looking for log inconsistencies about TA records
+t = aggregate(n_ta ~ epoch + dst, ta_log, FUN=length)
+colnames(t) <- c("epoch", "dst", "n_rec_ta_present")
+tmin = aggregate(n_ta ~ epoch + dst, ta_log, FUN=min)
+colnames(tmin) <- c("epoch", "dst", "ta_min")
+tmax = aggregate(n_ta ~ epoch + dst, ta_log, FUN=max)
+colnames(tmax) <- c("epoch", "dst", "ta_max")
+
+t = merge(t, tmin, all=T)
+t = merge(t, tmax, all=T)
+rm(tmin)
+rm(tmax)
+t = merge(rsum[c("epoch", "dst", "n_rec_ta")], t, all=T)
+
+message("TA log inconsistencies")
+t[is.na(t$n_rec_ta_present) | is.na(t$n_rec_ta) | t$n_rec_ta_present != t$n_rec_ta,]
+rm(t)
+
+usend = unique(send[c("src", "seqn", "epoch")])
+# merging send records from both app and Crystal logs
+all_send = merge(asend[,c("src", "seqn", "epoch", "acked")], usend, by=c("src", "seqn", "epoch"), all=T)
+t = aggregate(epoch ~ src + seqn, all_send, FUN=length)
+colnames(t) <- c("src", "seqn", "n_epochs")
+if (max(t$n_epochs) > 1) {
+  message("Inconsistent epoch numbers in app and Crystal logs")
+  print(merge(all_send, t[t$n_epochs>1,]))
+  quit()
+}
+# at this point (src, seqn) are unique in all_send
+
+sendrecv = merge(all_send[,c("src", "seqn", "epoch", "acked")], sink_recv_nodup[,c("src", "seqn", "epoch")], by=c("src", "seqn"), all.x=T, suffixes=c(".tx", ".rx"))
+total_packets = dim(all_send)[1]
+total_sent = dim(unique(usend[c("src", "seqn")]))[1]
+nodups_recv = dim(sendrecv[!is.na(sendrecv$epoch.rx) | sendrecv$acked,])[1] # in sendrecv we don't have packets "received but not sent"
 PDR = nodups_recv/total_sent
 real_PDR = nodups_recv/total_packets
-message("Total messages: ", total_packets, " sent: ", total_sent, " received: ", nodups_recv , " OLD_PDR: ", PDR, " real PDR: ", real_PDR)
+message("Total packets generated: ", total_packets, " sent: ", total_sent, " received: ", nodups_recv , " OLD_PDR: ", PDR, " real PDR: ", real_PDR)
 
-lost = sendrecv[is.na(sendrecv$epoch.rx),c("src", "seqn", "epoch.tx")]
+lost = sendrecv[is.na(sendrecv$epoch.rx),c("src", "seqn", "epoch.tx", "acked")]
 message("Not delivered packets: ", dim(lost)[1])
 lost
 

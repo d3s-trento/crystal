@@ -57,7 +57,7 @@ def convert_time(time):
 S = re.compile(record_pattern%"S (?P<epoch>\d+):(?P<n_tx>\d+) (?P<n_acks>\d+) (?P<sync_acks>\d+):(?P<sync_missed>\d+) (?P<skew>-?\d+) (?P<hops>\d+)")
 A = re.compile(record_pattern%"A (?P<epoch>\d+):(?P<seqn>\d+) (?P<acked>\d+) (?P<log_seqn>\d+)")
 P = re.compile(record_pattern%"P (?P<epoch>\d+):(?P<recvsrc_s>\d+) (?P<recvtype_s>\d+) (?P<recvlen_s>\d+):(?P<n_badtype_a>\d+) (?P<n_badlen_a>\d+) (?P<n_badcrc_a>\d+) (?P<ack_skew_err>-?\d+):(?P<end_s_time>-?\d+)")
-R = re.compile(record_pattern%"R (?P<epoch>\d+):(?P<n_ta>\d+) (?P<n_recv_rec>\d+):(?P<noise>-?\d+) (?P<channel>\d+):(?P<s_tx_cnt>\d+) (?P<s_rx_cnt>\d+) (?P<cca_busy>\d+)")
+R = re.compile(record_pattern%"R (?P<epoch>\d+):(?P<n_ta>\d+) (?P<n_rec_ta>\d+):(?P<noise>-?\d+) (?P<channel>\d+):(?P<s_tx_cnt>\d+) (?P<s_rx_cnt>\d+) (?P<cca_busy>\d+)")
 T = re.compile(record_pattern%"T (?P<epoch>\d+):(?P<n_ta>\d+) (?P<status>\d+):(?P<src>\d+) (?P<seqn>\d+) (?P<type>\d+) (?P<length>\d+):(?P<t_rx_cnt>\d+) (?P<a_rx_cnt>\d+) (?P<acked>\d+)")
 E = re.compile(record_pattern%"E (?P<epoch>\d+):(?P<ontime>[\d\.]+):(?P<ton_s>\d+) (?P<ton_t>\d+) (?P<ton_a>\d+)")
 F = re.compile(record_pattern%"F (?P<epoch>\d+):(?P<tf_s>\d+) (?P<tf_t>\d+) (?P<tf_a>\d+):(?P<n_short_s>\d+) (?P<n_short_t>\d+) (?P<n_short_a>\d+)")
@@ -77,7 +77,7 @@ def parse():
     nodelog = open("node.log",'w')
     Slog.write("epoch\tsrc\tn_tx\tn_acks\tsync_acks\tsync_missed\tskew\thops\ttime\n")
     Plog.write("epoch\tnode\trecvsrc_s\trecvtype_s\trecvlen_s\tn_badtype_a\tn_badlen_a\tn_badcrc_a\tack_skew_err\tend_s_time\ttime\n")
-    Rlog.write("epoch\tdst\tn_ta\tn_rx\tnoise\tchannel\ts_tx_cnt\ts_rx_cnt\tcca_busy\ttime\n")
+    Rlog.write("epoch\tdst\tn_ta\tn_rec_ta\tnoise\tchannel\ts_tx_cnt\ts_rx_cnt\tcca_busy\ttime\n")
     Tlog.write("epoch\tn_ta\tsrc\tdst\tseqn\ttype\tlength\tstatus\tt_rx_cnt\ta_rx_cnt\tacked\ttime\n")
     Elog.write("epoch\tnode\tontime\tton_s\tton_t\tton_a\ttime\n")
     Flog.write("epoch\tnode\ttf_s\ttf_t\ttf_a\tn_short_s\tn_short_t\tn_short_a\t\ttime\n")
@@ -173,7 +173,7 @@ def parse():
                         epoch = int(g["epoch"])
                         dst = self_id if self_id is not None else int(g["self_id"])
                         n_ta = int(g["n_ta"])
-                        n_recv_rec = int(g["n_recv_rec"])
+                        n_rec_ta = int(g["n_rec_ta"])
                         noise = int(g["noise"])
                         channel = int(g["channel"])
                         s_tx_cnt = int(g["s_tx_cnt"])
@@ -181,7 +181,7 @@ def parse():
                         cca_busy = int(g["cca_busy"])
                         time = convert_time(g["time"])
                         
-                        Rlog.write("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n"%(epoch, dst, n_ta, n_recv_rec, noise, channel, s_tx_cnt, s_rx_cnt, cca_busy, time))
+                        Rlog.write("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n"%(epoch, dst, n_ta, n_rec_ta, noise, channel, s_tx_cnt, s_rx_cnt, cca_busy, time))
                         continue
                 m = E.match(l) 
                 if m:
