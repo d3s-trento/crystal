@@ -151,7 +151,7 @@ lost = sendrecv[is.na(sendrecv$epoch.rx),c("src", "seqn", "epoch.tx", "acked")]
 message("Not delivered packets: ", dim(lost)[1])
 lost
 
-notsent = merge(asend[,c("src", "seqn", "epoch")], send[,c("src", "seqn", "epoch")], by=c("src", "seqn"), all.x=T, suffixes=c(".app", ".cr"))
+notsent = merge(asend[,c("src", "seqn", "epoch", "acked")], send[,c("src", "seqn", "epoch")], by=c("src", "seqn"), all.x=T, suffixes=c(".app", ".cr"))
 notsent = notsent[is.na(notsent$epoch.cr),]
 message("Not sent packets: ", dim(notsent)[1])
 print(notsent)
