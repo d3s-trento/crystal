@@ -135,7 +135,7 @@ def mk_env(power, channel, sink, num_senders, n_empty, cca):
     
     if testbed in ("indriya", "fbk"):
         cflags += ["-DSTART_DELAY_SINK=40", "-DSTART_DELAY_NONSINK=20"]
-    elif testbed in ("unitn"):
+    elif testbed in ("unitn",):
         cflags += ["-DSTART_DELAY_SINK=20", "-DSTART_DELAY_NONSINK=5"]
     else:
         cflags += ["-DSTART_DELAY_SINK=0", "-DSTART_DELAY_NONSINK=0"]
