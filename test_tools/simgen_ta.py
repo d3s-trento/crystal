@@ -132,9 +132,10 @@ def mk_env(power, channel, sink, num_senders, n_empty, cca):
         cflags += ["-DTINYOS_NODE_ID=1"]
     if testbed == "cooja":
         cflags += ["-DCOOJA=1"]
+    
     if testbed in ("indriya", "fbk"):
         cflags += ["-DSTART_DELAY_SINK=40", "-DSTART_DELAY_NONSINK=20"]
-    if testbed in ("unitn"):
+    elif testbed in ("unitn"):
         cflags += ["-DSTART_DELAY_SINK=20", "-DSTART_DELAY_NONSINK=5"]
     else:
         cflags += ["-DSTART_DELAY_SINK=0", "-DSTART_DELAY_NONSINK=0"]
