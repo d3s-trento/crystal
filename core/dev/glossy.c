@@ -549,22 +549,22 @@ uint8_t glossy_stop(void) {
   return rx_cnt;
 }
 
-uint8_t get_data_len(void) {
+uint8_t glossy_get_payload_len(void) {
   return rx_data_len;
 }
 uint8_t get_app_header(void) {
   return (expected_header & GLOSSY_APP_HEADER_MASK) >> 4;
 }
 
-uint8_t get_rx_cnt(void) {
+uint8_t glossy_get_n_rx(void) {
   return rx_cnt;
 }
 
-uint8_t get_tx_cnt(void) {
+uint8_t glossy_get_n_tx(void) {
   return tx_cnt;
 }
 
-uint8_t get_relay_cnt(void) {
+uint8_t glossy_get_relay_cnt_first_rx(void) {
   return relay_cnt;
 }
 
@@ -572,7 +572,7 @@ rtimer_clock_t get_T_slot_h(void) {
   return T_slot_h;
 }
 
-uint8_t is_t_ref_l_updated(void) {
+uint8_t glossy_is_t_ref_updated(void) {
   return t_ref_l_updated;
 }
 
@@ -580,7 +580,7 @@ rtimer_clock_t get_t_first_rx_l(void) {
   return t_first_rx_l;
 }
 
-rtimer_clock_t get_t_ref_l(void) {
+rtimer_clock_t glossy_get_t_ref(void) {
   return t_ref_l;
 }
 

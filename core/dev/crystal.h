@@ -4,6 +4,9 @@
 #include "glossy.h"
 #include "stdbool.h"
 
+#define CRYSTAL_MAX_PERIOD      (60000UL) // ~ 1.8 s
+#define CRYSTAL_MAX_SCAN_EPOCHS 200
+
 typedef uint8_t crystal_addr_t; // IPSN'18
 //typedef uint16_t crystal_addr_t;
 
@@ -91,6 +94,8 @@ crystal_config_t crystal_get_config();
 /* Start Crystal with the given configuration */
 bool crystal_start(crystal_config_t* conf);
 
+/* Stop Crystal */
+void crystal_stop();
 
 typedef struct {
   crystal_epoch_t epoch;

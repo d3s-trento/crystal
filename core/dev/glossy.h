@@ -185,7 +185,7 @@ void glossy_start(struct glossy *glossy_,
  */
 uint8_t glossy_stop(void);
 
-uint8_t get_data_len(void);
+uint8_t glossy_get_payload_len(void);
 uint8_t get_app_header(void);
 
 /**
@@ -194,8 +194,8 @@ uint8_t get_app_header(void);
  *                   last Glossy phase.
  *                   If it is zero, the packet was not successfully received.
  */
-uint8_t get_rx_cnt(void);
-uint8_t get_tx_cnt(void);
+uint8_t glossy_get_n_rx(void);
+uint8_t glossy_get_n_tx(void);
 
 /**
  * \brief            Get the current Glossy state.
@@ -224,7 +224,7 @@ rtimer_clock_t get_t_first_rx_l(void);
  * \returns          Value of the relay counter embedded in the first packet
  *                   received during the last Glossy phase.
  */
-uint8_t get_relay_cnt(void);
+uint8_t glossy_get_relay_cnt_first_rx(void);
 
 /**
  * \brief            Get the local estimation of T_slot, in DCO clock ticks.
@@ -237,14 +237,14 @@ rtimer_clock_t get_T_slot_h(void);
  * \returns          Low-frequency reference time
  *                   (i.e., time at which the initiator started the flood).
  */
-rtimer_clock_t get_t_ref_l(void);
+rtimer_clock_t glossy_get_t_ref(void);
 
 /**
  * \brief            Provide information about current synchronization status.
  * \returns          Not zero if the synchronization reference time was
  *                   updated during the last Glossy phase, zero otherwise.
  */
-uint8_t is_t_ref_l_updated(void);
+uint8_t glossy_is_t_ref_updated(void);
 
 /**
  * \brief            Set low-frequency synchronization reference time.
