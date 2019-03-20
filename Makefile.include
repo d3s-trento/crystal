@@ -66,6 +66,8 @@ CONTIKI_SOURCEFILES += $(CONTIKIFILES)
 CONTIKIDIRS += ${addprefix $(CONTIKI)/core/,dev lib net net/mac net/rime \
                  net/routing sys cfs ctk lib/ctk loader . }
 
+CONTIKIDIRS += $(CONTIKI)/net/crystal
+
 oname = ${patsubst %.c,%.o,${patsubst %.S,%.o,$(1)}}
 
 CONTIKI_OBJECTFILES = ${addprefix $(OBJECTDIR)/,${call oname, $(CONTIKI_SOURCEFILES)}}
