@@ -95,7 +95,15 @@ enum {
 };
 
 enum {
-  GLOSSY_SYNC = 1, GLOSSY_NO_SYNC = 0
+  GLOSSY_UNKNOWN_PAYLOAD_LEN = 0
+};
+
+enum {
+  GLOSSY_IGNORE_TYPE = 0
+};
+
+enum {
+  GLOSSY_WITH_SYNC = 1, GLOSSY_WITHOUT_SYNC = 0
 };
 /**
  * List of possible Glossy states.
@@ -172,7 +180,7 @@ PROCESS_NAME(glossy_process);
 void glossy_start(struct glossy *glossy_,
     uint8_t *data_, uint8_t data_len_, uint8_t initiator_, uint8_t channel_,
     uint8_t sync_, uint8_t tx_max_, uint8_t stop_on_sync_,
-    uint8_t header_, uint8_t ignore_type_,
+    uint8_t header_,
     rtimer_clock_t t_start_, rtimer_clock_t t_stop_, rtimer_callback_t cb_,
     struct rtimer *rtimer_, void *ptr_);
 

@@ -33,20 +33,52 @@
  *
  */
 
-
-
 #include "crystal.h"
 #include "crystal-conf.h"
 #include "crystal-private.h"
+
+
+#if CRYSTAL_2538
+#include <stdio.h>
+#include "cc2538-rf.h"
+#include "dev/leds.h"
+//#include "node-id.h"
+#include "unimplemented.h"
+#endif
+
+#if CRYSTAL_2420
 #include "cc2420.h"
 #include "node-id.h"
+#endif
 
+#if CRYSTAL_2420
 static union {
   uint8_t raw[CRYSTAL_PKTBUF_LEN];
   crystal_sync_hdr_t sync_hdr;
   crystal_data_hdr_t data_hdr;
   crystal_ack_hdr_t ack_hdr;
 } buf;
+#define CRYSTAL_S_HDR_LEN (sizeof(crystal_sync_hdr_t))
+#define CRYSTAL_T_HDR_LEN (sizeof(crystal_data_hdr_t))
+#define CRYSTAL_A_HDR_LEN (sizeof(crystal_ack_hdr_t))
+#endif
+
+#if CRYSTAL_2538
+static union {
+  uint8_t raw[CRYSTAL_PKTBUF_LEN];
+  struct  __attribute__((packed, aligned(1))) {
+    uint8_t type;
+    union  __attribute__((packed, aligned(1))){
+      crystal_sync_hdr_t sync_hdr;
+      crystal_data_hdr_t data_hdr;
+      crystal_ack_hdr_t ack_hdr;
+    };
+  };
+} buf;
+#define CRYSTAL_S_HDR_LEN (sizeof(crystal_sync_hdr_t) + sizeof(buf.type))
+#define CRYSTAL_T_HDR_LEN (sizeof(crystal_data_hdr_t) + sizeof(buf.type))
+#define CRYSTAL_A_HDR_LEN (sizeof(crystal_ack_hdr_t)  + sizeof(buf.type))
+#endif
 #define BZERO_BUF() bzero(buf.raw, CRYSTAL_PKTBUF_LEN)
 
 
@@ -78,7 +110,9 @@ crystal_app_log_t crystal_app_log;  // public writeable structure for app info i
 
 static uint8_t* payload;            // application payload pointer for the current slot
 
+#if CRYSTAL_2420
 static struct glossy glossy_S, glossy_T, glossy_A;  // Glossy objects for different phases
+#endif
 
 static struct rtimer rt;                // Rtimer used to schedule Crystal
 static rtimer_callback_t timer_handler; // Pointer to the main thread function (either root or node)
@@ -96,6 +130,8 @@ static uint8_t channel;           // current channel
 static uint16_t synced_with_ack;  // Synchronized with an acknowledgement (A phase)
 static uint16_t n_noack_epochs;   // Number of consecutive epochs the node did not synchronize with any acknowledgement
 static uint16_t sync_missed = 0;  // Current number of consecutive S phases without resynchronization
+
+static uint16_t sink_id = GLOSSY_UNKNOWN_INITIATOR; // the node ID of the sink (only CC2538)
 
 static uint16_t skew_estimated;   // Whether the clock skew over CRYSTAL_PERIOD has already been estimated
 static int      period_skew;      // Current estimation of clock skew over a period of length CRYSTAL_PERIOD
@@ -136,6 +172,7 @@ static uint16_t rx_count_A;
 static uint16_t ton_S, ton_T, ton_A;     // total duration of the phases in the current epoch
 static uint16_t tf_S, tf_T, tf_A;        // total duration of the phases when all N packets are received
 static uint16_t n_short_S, n_short_T, n_short_A; // number of "complete" S/T/A phases (those counted in tf_S/tf_T/tf_A)
+static uint16_t recv_pkt_type;           // holds the received packet type after a Glossy session
 
 // info about current TA (for logging)
 static uint16_t log_recv_type;
@@ -169,11 +206,6 @@ static inline void measure_noise();
 #define N_TA_FROM_OFFS(offs) ((offs - TAS_START_OFFS)/TA_DURATION)
 
 #define N_TA_TO_REF(tref, n) (tref-PHASE_A_OFFS(n))
-
-
-#define SYSTEM_RESET() do {WDTCTL = 0;} while(0)
-#define RADIO_OSC_OFF() cc2420_oscoff()
-#define RADIO_OSC_ON() cc2420_oscon()
 
 
 // info about a data packet received during T phase
@@ -248,19 +280,36 @@ static inline void log_ta(int tx) {
 
 #include "crystal-chseq.c"
 
-#define CRYSTAL_S_LEN (sizeof(crystal_sync_hdr_t) + conf.plds_S)
-#define CRYSTAL_T_LEN (sizeof(crystal_data_hdr_t) + conf.plds_T)
-#define CRYSTAL_A_LEN (sizeof(crystal_ack_hdr_t)  + conf.plds_A)
-
+#define CRYSTAL_S_TOTAL_LEN (CRYSTAL_S_HDR_LEN + conf.plds_S)
+#define CRYSTAL_T_TOTAL_LEN (CRYSTAL_T_HDR_LEN + conf.plds_T)
+#define CRYSTAL_A_TOTAL_LEN (CRYSTAL_A_HDR_LEN + conf.plds_A)
 
 #define WAIT_UNTIL(time, cl_pt) \
 {\
-  rtimer_set(t, (time), timer_handler, ptr); \
+  rtimer_set(t, (time), 0, timer_handler, ptr); \
   PT_YIELD(cl_pt); \
 }
 
+
+#if CRYSTAL_2420
+#define GLOSSY(glossy_obj, init_id, length, type_, ntx, channel, is_sync, stop_on_sync, pt) \
+glossy_start(glossy_obj, buf.raw, length, init_id==node_id?GLOSSY_INITIATOR:GLOSSY_RECEIVER, channel, is_sync, ntx, stop_on_sync, type_, t_slot_start, t_slot_stop, timer_handler, &rt, ptr)
+
+#define GLOSSY_WAIT(pt) PT_YIELD(pt); recv_pkt_type = get_app_header(); glossy_stop();
+#endif
+
+#if CRYSTAL_2538
+#define GLOSSY(glossy_obj, init_id, length, type_, ntx, channel, is_sync, stop_on_sync, pt) \
+buf.type = type_;\
+WAIT_UNTIL(t_slot_start, pt);\
+glossy_start(init_id, buf.raw, length, ntx, is_sync);
+
+#define GLOSSY_WAIT(pt) WAIT_UNTIL(t_slot_stop, pt); recv_pkt_type = buf.type; glossy_stop();
+#endif
+
+
 // workarounds for wrong ref time reported by glossy (which happens VERY rarely)
-// sometimes it happens due to a wrong hopcount
+// sometimes it happens due to a wrong hopcount (CRC collision?)
 #define MAX_CORRECT_HOPS 30
 
 static inline int correct_hops() {
@@ -323,23 +372,25 @@ PT_THREAD(s_root_thread(struct rtimer *t, void* ptr))
   buf.sync_hdr.src   = node_id;
 
   if (payload) {
-    memcpy(buf.raw + sizeof(crystal_sync_hdr_t),
+    memcpy(buf.raw + CRYSTAL_S_HDR_LEN,
         payload, conf.plds_S);
   }
 
   channel = get_channel_epoch(epoch);
 
-  glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
-      GLOSSY_INITIATOR, channel, GLOSSY_SYNC, conf.ntx_S,
-      0, // don't stop on sync
-      CRYSTAL_TYPE_SYNC, 
-      0, // don't ignore type
-      t_s_start, t_s_stop, timer_handler, t, ptr);
-  // Yield the protothread. It will be resumed when Glossy terminates.
-  PT_YIELD(&pt_s_root);
+  t_slot_start = t_s_start;
+  t_slot_stop  = t_s_stop;
 
-  glossy_stop();
-  //leds_off(LEDS_BLUE);
+  GLOSSY(&glossy_S,
+      node_id, CRYSTAL_S_TOTAL_LEN, 
+      CRYSTAL_TYPE_SYNC, 
+      conf.ntx_S,
+      channel, 
+      GLOSSY_WITH_SYNC,
+      0, // don't stop on sync
+      &pt_s_root);
+  GLOSSY_WAIT(&pt_s_root);
+
   UPDATE_SLOT_STATS(S, 1);
   tx_count_S = glossy_get_n_tx();
   rx_count_S = glossy_get_n_rx();
@@ -365,15 +416,16 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
 
       app_pre_T();
 
-      glossy_start(&glossy_T, buf.raw, CRYSTAL_T_LEN,
-          GLOSSY_RECEIVER, channel, GLOSSY_NO_SYNC, conf.ntx_T,
+      GLOSSY(&glossy_T, GLOSSY_UNKNOWN_INITIATOR, 
+          CRYSTAL_T_TOTAL_LEN, 
+          CRYSTAL_TYPE_DATA,
+          conf.ntx_T, 
+          channel, 
+          GLOSSY_WITHOUT_SYNC,
           0, // don't stop on sync
-          CRYSTAL_TYPE_DATA, 
-          0, // don't ignore type
-          t_slot_start, t_slot_stop, timer_handler, t, ptr);
+          &pt_ta_root);
+      GLOSSY_WAIT(&pt_ta_root);
 
-      PT_YIELD(&pt_ta_root);
-      glossy_stop();
 
       UPDATE_SLOT_STATS(T, 0);
 
@@ -383,9 +435,11 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
       if (rx_count_T) { // received data
         n_empty_ts = 0;
         n_high_noise = 0;
-        log_recv_type = get_app_header();
+        log_recv_type = recv_pkt_type;
+        // TBD: get_app_header() is not implemented in the current version of glossy for this platform, should we unify it? 
+        //log_recv_type = get_app_header();
         log_recv_length = glossy_get_payload_len();
-        correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
+        correct_packet = (log_recv_length == CRYSTAL_T_TOTAL_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
         log_ta_status = correct_packet?CRYSTAL_RECV_OK:CRYSTAL_BAD_DATA;
       }
       else if (is_corrupted()) {
@@ -408,7 +462,7 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
         log_ta_status = CRYSTAL_SILENCE;
       }
 
-      payload = app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
+      payload = app_between_TA(correct_packet, buf.raw + CRYSTAL_T_HDR_LEN);
       log_ta(0);
       BZERO_BUF();
       // -- Phase T end (root)
@@ -427,24 +481,26 @@ PT_THREAD(ta_root_thread(struct rtimer *t, void* ptr))
 
       buf.ack_hdr.n_ta = n_ta;
       buf.ack_hdr.epoch = epoch;
-      memcpy(buf.raw + sizeof(crystal_ack_hdr_t),
+      memcpy(buf.raw + CRYSTAL_A_HDR_LEN,
           payload, conf.plds_A);
 
       t_slot_start = t_ref_root + PHASE_A_OFFS(n_ta);
       t_slot_stop = t_slot_start + conf.w_A;
 
-      glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN,
-          GLOSSY_INITIATOR, channel, CRYSTAL_SYNC_ACKS, conf.ntx_A,
-          0, // don't stop on sync
-          CRYSTAL_TYPE_ACK, 
-          0, // don't ignore type
-          t_slot_start, t_slot_stop, timer_handler, t, ptr);
+      GLOSSY(&glossy_A, 
+          node_id, 
+          CRYSTAL_A_TOTAL_LEN,
+          CRYSTAL_TYPE_ACK,
+          conf.ntx_A, 
+          channel,
+          CRYSTAL_SYNC_ACKS?GLOSSY_WITH_SYNC:GLOSSY_WITHOUT_SYNC,
+          0, // don't stop on sync 
+          &pt_ta_root);
+      GLOSSY_WAIT(&pt_ta_root);
 
-      PT_YIELD(&pt_ta_root);
-      glossy_stop();
 
       UPDATE_SLOT_STATS(A, 1);
-      app_post_A(0, buf.raw + sizeof(crystal_ack_hdr_t));
+      app_post_A(0, buf.raw + CRYSTAL_A_HDR_LEN);
       BZERO_BUF();
       // -- Phase A end (root)
 
@@ -509,28 +565,35 @@ PT_THREAD(scan_thread(struct rtimer *t, void* ptr))
 
   // Scanning loop
   while (1) {
+#if CRYSTAL_2420
     bzero(&glossy_S, sizeof(glossy_S)); // reset the Glossy timing info
+#endif
     t_slot_start = RTIMER_NOW() + (GLOSSY_PRE_TIME + 6); // + 6 is just to be sure
     t_slot_stop = t_slot_start + CRYSTAL_SCAN_SLOT_DURATION;
 
-    glossy_start(&glossy_S, buf.raw, 0 /* size is not specified */,
-        GLOSSY_RECEIVER, channel, GLOSSY_SYNC, 5 /* N */,
+    GLOSSY(&glossy_S, GLOSSY_UNKNOWN_INITIATOR, GLOSSY_UNKNOWN_PAYLOAD_LEN,
+        GLOSSY_IGNORE_TYPE,
+        CRYSTAL_2420? 5 : GLOSSY_UNKNOWN_N_TX_MAX, // N
+        channel,
+        GLOSSY_WITH_SYNC,
         //1, // stop immediately on sync
         0, // don't stop on sync
-        0, // don't specify packet type
-        1, // ignore type (receive anything)
-        t_slot_start, t_slot_stop, timer_handler, t, ptr);
-    PT_YIELD(&pt_scan);
-    glossy_stop();
+        &pt_scan);
+    GLOSSY_WAIT(&pt_scan);
+
+
 
     if (glossy_get_n_rx() > 0) {
-      recvtype_S = get_app_header();
+      recvtype_S = recv_pkt_type;
       recvlen_S = glossy_get_payload_len();
 
       // Sync packet received
       if (recvtype_S == CRYSTAL_TYPE_SYNC && 
-          recvlen_S  == CRYSTAL_S_LEN  //&&
+          recvlen_S  == CRYSTAL_S_TOTAL_LEN  //&&
           /*buf.sync_hdr.src == conf.sink_id*/) {
+#if CRYSTAL_2538
+        sink_id = glossy_get_initiator_id();
+#endif
         epoch = buf.sync_hdr.epoch;
         crystal_info.epoch = epoch;
         n_ta = 0;
@@ -544,7 +607,7 @@ PT_THREAD(scan_thread(struct rtimer *t, void* ptr))
       }
       // Ack packet received
       else if (recvtype_S == CRYSTAL_TYPE_ACK && 
-               recvlen_S  == CRYSTAL_A_LEN) {
+               recvlen_S  == CRYSTAL_A_TOTAL_LEN) {
         epoch = buf.ack_hdr.epoch;
         crystal_info.epoch = epoch;
 
@@ -577,9 +640,10 @@ PT_THREAD(scan_thread(struct rtimer *t, void* ptr))
       break; // exit the scanning
     }
   }
-
+#if CRYSTAL_2420
   if (recvtype_S != CRYSTAL_TYPE_SYNC)
     bzero(&glossy_S, sizeof(glossy_S)); // reset the timing info if a non-S packet was received
+#endif
 
   PT_END(&pt_scan);
 }
@@ -592,27 +656,28 @@ PT_THREAD(s_node_thread(struct rtimer *t, void* ptr))
   
   channel = get_channel_epoch(epoch);
 
-  glossy_start(&glossy_S, buf.raw, CRYSTAL_S_LEN,
-      GLOSSY_RECEIVER, channel, GLOSSY_SYNC, conf.ntx_S,
-      0, // don't stop on sync
+  t_slot_start = t_s_start;
+  t_slot_stop  = t_s_stop;
+  GLOSSY(&glossy_S, sink_id, 
+      CRYSTAL_S_TOTAL_LEN,
       CRYSTAL_TYPE_SYNC, 
-      0, // don't ignore type
-      t_s_start, t_s_stop, timer_handler, t, ptr);
-
-  PT_YIELD(&pt_s_node);
-  glossy_stop();
+      conf.ntx_S, channel,
+      GLOSSY_WITH_SYNC,
+      0, // don't stop on sync
+      &pt_s_node);
+  GLOSSY_WAIT(&pt_s_node);
 
   UPDATE_SLOT_STATS(S, 0);
 
   recvlen_S = glossy_get_payload_len();
-  recvtype_S = get_app_header();
+  recvtype_S = recv_pkt_type;
   recvsrc_S = buf.sync_hdr.src;
   rx_count_S = glossy_get_n_rx();
   tx_count_S = glossy_get_n_tx();
 
   correct_packet = (recvtype_S == CRYSTAL_TYPE_SYNC 
       /*&& recvsrc_S  == conf.sink_id */
-      && recvlen_S  == CRYSTAL_S_LEN);
+      && recvlen_S  == CRYSTAL_S_TOTAL_LEN);
 
   if (rx_count_S > 0 && correct_packet) {
     epoch = buf.sync_hdr.epoch;
@@ -640,7 +705,7 @@ PT_THREAD(s_node_thread(struct rtimer *t, void* ptr))
     t_ref_corrected_s = t_ref_estimated;
   }
 
-  app_post_S(correct_packet, buf.raw + sizeof(crystal_sync_hdr_t));
+  app_post_S(correct_packet, buf.raw + CRYSTAL_S_HDR_LEN);
   BZERO_BUF();
 
   crystal_info.hops = hopcount;
@@ -673,7 +738,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
       n_ta_tx ++;
       // no guards if I transmit
       guard = 0;
-      memcpy(buf.raw + sizeof(crystal_data_hdr_t), payload, conf.plds_T);
+      memcpy(buf.raw + CRYSTAL_T_HDR_LEN, payload, conf.plds_T);
     }
     else {
       // guards for receiving
@@ -685,23 +750,25 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
     //choice of the channel for each T-A slot
     channel = get_channel_epoch_ta(epoch, n_ta);
 
-    glossy_start(&glossy_T, buf.raw, CRYSTAL_T_LEN, 
-        i_tx, channel, GLOSSY_NO_SYNC, conf.ntx_T,
-        0, // don't stop on sync
+    GLOSSY(&glossy_T,
+        i_tx ? node_id : GLOSSY_UNKNOWN_INITIATOR, 
+        CRYSTAL_T_TOTAL_LEN, 
         CRYSTAL_TYPE_DATA, 
-        0, // don't ignore type
-        t_slot_start, t_slot_stop, timer_handler, t, ptr);
+        conf.ntx_T,
+        channel,
+        GLOSSY_WITHOUT_SYNC,
+        0, // don't stop on sync
+        &pt_ta_node);
+    GLOSSY_WAIT(&pt_ta_node);
 
-    PT_YIELD(&pt_ta_node);
-    glossy_stop();
     UPDATE_SLOT_STATS(T, i_tx);
 
     rx_count_T = glossy_get_n_rx();
     if (!i_tx) {
       if (rx_count_T) { // received data
-        log_recv_type = get_app_header();
+        log_recv_type = recv_pkt_type;
         log_recv_length = glossy_get_payload_len();
-        correct_packet = (log_recv_length == CRYSTAL_T_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
+        correct_packet = (log_recv_length == CRYSTAL_T_TOTAL_LEN && log_recv_type == CRYSTAL_TYPE_DATA);
         log_ta_status = correct_packet?CRYSTAL_RECV_OK:CRYSTAL_BAD_DATA;
         n_empty_ts = 0;
       }
@@ -716,7 +783,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
       cca_busy_cnt = get_cca_busy_cnt();
     }
 
-    app_between_TA(correct_packet, buf.raw + sizeof(crystal_data_hdr_t));
+    app_between_TA(correct_packet, buf.raw + CRYSTAL_T_HDR_LEN);
 
     BZERO_BUF();
 
@@ -727,21 +794,22 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
     t_slot_start = t_ref_corrected - guard + PHASE_A_OFFS(n_ta) - CRYSTAL_REF_SHIFT;
     t_slot_stop = t_slot_start + conf.w_A + guard;
 
-    glossy_start(&glossy_A, buf.raw, CRYSTAL_A_LEN, 
-        GLOSSY_RECEIVER, channel, CRYSTAL_SYNC_ACKS, conf.ntx_A,
-        0, // don't stop on sync
+    GLOSSY(&glossy_A, 
+        sink_id, 
+        CRYSTAL_A_TOTAL_LEN,
         CRYSTAL_TYPE_ACK, 
-        0, // don't ignore type
-        t_slot_start, t_slot_stop, timer_handler, t, ptr);
-
-    PT_YIELD(&pt_ta_node);
-    glossy_stop();
+        conf.ntx_A,
+        channel,
+        CRYSTAL_SYNC_ACKS?GLOSSY_WITH_SYNC:GLOSSY_WITHOUT_SYNC,
+        0, // don't stop on sync
+        &pt_ta_node);
+    GLOSSY_WAIT(&pt_ta_node);
     UPDATE_SLOT_STATS(A, 0);
 
     rx_count_A = glossy_get_n_rx();
     if (rx_count_A) {
-      if (glossy_get_payload_len() == CRYSTAL_A_LEN 
-          && get_app_header() == CRYSTAL_TYPE_ACK 
+      if (glossy_get_payload_len() == CRYSTAL_A_TOTAL_LEN 
+          && recv_pkt_type == CRYSTAL_TYPE_ACK 
           && CRYSTAL_ACK_CMD_CORRECT(buf.ack_hdr)) {
         correct_packet = 1;
         n_noacks = 0;
@@ -777,9 +845,9 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
       }
 
       // logging info about bad packets
-      if (get_app_header() != CRYSTAL_TYPE_ACK)
+      if (recv_pkt_type != CRYSTAL_TYPE_ACK)
         n_badtype_A ++;
-      if (glossy_get_payload_len() != CRYSTAL_A_LEN)
+      if (glossy_get_payload_len() != CRYSTAL_A_TOTAL_LEN)
         n_badlen_A ++;
 
       n_high_noise = 0;
@@ -804,7 +872,7 @@ PT_THREAD(ta_node_thread(struct rtimer *t, void* ptr))
       }
     }
 
-    app_post_A(correct_packet, buf.raw + sizeof(crystal_ack_hdr_t));
+    app_post_A(correct_packet, buf.raw + CRYSTAL_A_HDR_LEN);
 
     log_ta(i_tx);
 
@@ -948,16 +1016,24 @@ static char node_main_thread(struct rtimer *t, void *ptr) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 void crystal_init() {
+#if CRYSTAL_2538
+  glossy_init();
+  cc2538_rf_set_channel(CRYSTAL_DEF_CHANNEL);
+#endif
+#if CRYSTAL_2420
   cc2420_set_channel(CRYSTAL_DEF_CHANNEL);
+#endif
 }
 
 static inline void measure_noise() {
 #if CRYSTAL_LOGLEVEL == CRYSTAL_LOGS_ALL
+#if CRYSTAL_2420
   noise_scan_channel = channel_array[epoch % get_num_channels()];
   cc2420_set_channel(noise_scan_channel);
   RADIO_OSC_ON();
   log_noise = cc2420_rssi();
   RADIO_OSC_OFF();
+#endif
 #endif
 }
 
@@ -965,9 +1041,9 @@ static inline void measure_noise() {
 bool crystal_start(crystal_config_t* conf_)
 {
   // check the config
-  if (sizeof(crystal_sync_hdr_t) + conf_->plds_S > CRYSTAL_PKTBUF_LEN ||
-      sizeof(crystal_data_hdr_t) + conf_->plds_T > CRYSTAL_PKTBUF_LEN ||
-      sizeof(crystal_ack_hdr_t)  + conf_->plds_A > CRYSTAL_PKTBUF_LEN ||
+  if (CRYSTAL_S_HDR_LEN + conf_->plds_S > CRYSTAL_PKTBUF_LEN ||
+      CRYSTAL_T_HDR_LEN + conf_->plds_T > CRYSTAL_PKTBUF_LEN ||
+      CRYSTAL_A_HDR_LEN + conf_->plds_A > CRYSTAL_PKTBUF_LEN ||
       conf_->period == 0        || // TODO: put something reasonable here
       conf_->period > CRYSTAL_MAX_PERIOD ||
       conf_->scan_duration == 0 ||
@@ -1002,40 +1078,30 @@ bool crystal_start(crystal_config_t* conf_)
   //leds_on(LEDS_RED);
 
   channel = CRYSTAL_DEF_CHANNEL;
+#if CRYSTAL_2420
   cc2420_set_txpower(TX_POWER);
   cc2420_set_cca_threshold(CRYSTAL_CCA_THRESHOLD);
+#endif
 
+#if CRYSTAL_2420
   // Start Glossy busy-waiting process.
   process_start(&glossy_process, NULL);
+#endif
   // Start Crystal
-  rtimer_set(&rt, RTIMER_NOW() + 10, timer_handler, NULL);
+  rtimer_set(&rt, RTIMER_NOW() + 10, 0, timer_handler, NULL);
   return true;
 }
 
 static void stop_timer_handler(struct rtimer *t, void *ptr) {}
 
 void crystal_stop() {
-  rtimer_set(&rt, RTIMER_NOW() + 2, stop_timer_handler, NULL);
+  rtimer_set(&rt, RTIMER_NOW() + 2, 0, stop_timer_handler, NULL);
 }
 
 
 
 
 // ------------------------------------------------------------------ Log output ---------------------------------------
-//#if PRINT_GRAZ
-#if 0
-#define PRINT_BUF_SIZE 50
-static char print_buf[PRINT_BUF_SIZE];
-#define PRINTF(format, ...) do {\
-  snprintf(print_buf, PRINT_BUF_SIZE, format "\n\n\n\n", __VA_ARGS__);\
-  printf(print_buf);\
-  clock_delay(300);\
-  printf(print_buf);\
-} while(0)
-#else
-#define PRINTF(format, ...) printf(format, __VA_ARGS__)
-#endif
-
 void crystal_print_epoch_logs() {
   static int first_time = 1;
   unsigned long avg_radio_on;
@@ -1076,6 +1142,10 @@ void crystal_print_epoch_logs() {
     glossy_S.T_slot_h, glossy_S.T_slot_h_sum, glossy_S.win_cnt,
     glossy_A.T_slot_h, glossy_A.T_slot_h_sum, glossy_A.win_cnt
     );*/
+
+#if CRYSTAL_2538
+  glossy_debug_print();
+#endif
 
 #if ENERGEST_CONF_ON && CRYSTAL_LOGLEVEL
   if (!first_time) {

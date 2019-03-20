@@ -434,10 +434,10 @@ char glossy_prepare_handler(struct rtimer *t, void *ptr) {
       glossy_state = GLOSSY_STATE_OFF; // too late to start
     }
     else {
-      rtimer_set(rtimer, t_start_l, start_tx_handler, NULL);
+      rtimer_set(rtimer, t_start_l, 0, start_tx_handler, NULL);
     }
   } else {
-    //rtimer_set(rtimer, t_start_l, start_rx_handler, NULL);
+    //rtimer_set(rtimer, t_start_l, 0, start_rx_handler, NULL);
     // why not start rx immediately instead?
     start_rx_handler(t, ptr);
   }
@@ -454,7 +454,7 @@ void glossy_start(struct glossy *glossy_,
     uint8_t *data_, uint8_t data_len_, uint8_t initiator_,
     uint8_t channel_,
     uint8_t sync_, uint8_t tx_max_, uint8_t stop_on_sync_,
-    uint8_t header_, uint8_t ignore_type_,
+    uint8_t header_,
     rtimer_clock_t t_start_, rtimer_clock_t t_stop_, rtimer_callback_t cb_,
     struct rtimer *rtimer_, void *ptr_) {
   // copy function arguments to the respective Glossy variables
@@ -467,7 +467,7 @@ void glossy_start(struct glossy *glossy_,
   data_len = data_len_;
   initiator = initiator_;
   channel = channel_;
-  sync = sync_ != 0;
+  sync = (sync_ == GLOSSY_WITH_SYNC);
   stop_on_sync = stop_on_sync_;
   tx_max = tx_max_;
   t_stop = t_stop_;
@@ -475,7 +475,7 @@ void glossy_start(struct glossy *glossy_,
   cb = cb_;
   rtimer = rtimer_;
   ptr = ptr_;
-  ignore_type = ignore_type_;
+  ignore_type = (header_ == GLOSSY_IGNORE_TYPE);
   app_header = (header_ & 0x0f) << 4;
 
   // initialize Glossy variables
@@ -527,7 +527,7 @@ void glossy_start(struct glossy *glossy_,
     process_poll(&glossy_process);
   }
   else {
-    rtimer_set(rtimer, t_start_l - GLOSSY_PRE_TIME, glossy_prepare_handler, NULL);
+    rtimer_set(rtimer, t_start_l - GLOSSY_PRE_TIME, 0, glossy_prepare_handler, NULL);
   }
 }
 

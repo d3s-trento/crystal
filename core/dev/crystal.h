@@ -4,7 +4,28 @@
 #include "glossy.h"
 #include "stdbool.h"
 
+#if !defined(CRYSTAL_2538)
+#define CRYSTAL_2538 0
+#endif
+
+#if !defined(CRYSTAL_2420)
+#define CRYSTAL_2420 0
+#endif
+
+#if CRYSTAL_2538 == 0 && CRYSTAL_2420 == 0
+#error CRYSTAL_2538 or CRYSTAL_2420 should be set
+#endif
+
+#if CRYSTAL_2538 && CRYSTAL_2420
+#error Only one of CRYSTAL_2538 and CRYSTAL_2420 should be set
+#endif
+
+#if CRYSTAL_2538
+#define CRYSTAL_MAX_PERIOD      0x1000000 // 512 s
+#endif
+#if CRYSTAL_2420
 #define CRYSTAL_MAX_PERIOD      (60000UL) // ~ 1.8 s
+#endif
 #define CRYSTAL_MAX_SCAN_EPOCHS 200
 
 typedef uint8_t crystal_addr_t; // IPSN'18

@@ -3,8 +3,16 @@
 
 #include "crystal.h"
 
+#if CRYSTAL_2538
+//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms
+#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms
+//#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 625) // 1.6 ms
+#endif
+
+#if CRYSTAL_2420
 #define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 250) // 4 ms (for long packets)
 //#define CRYSTAL_INTER_PHASE_GAP (RTIMER_SECOND / 500) // 2 ms (for short packets)
+#endif
 
 //#define CRYSTAL_SHORT_GUARD           5
 #define CRYSTAL_SHORT_GUARD           5
@@ -38,8 +46,13 @@
 #if COOJA
 #define CRYSTAL_REF_SHIFT 13   // 397us
 #else
+#if CRYSTAL_2538
+#define CRYSTAL_REF_SHIFT 13   // measured for firefly
+#endif
+#if CRYSTAL_2420
 #define CRYSTAL_REF_SHIFT 10   // 305us IPSN'18 submission
 //#define CRYSTAL_REF_SHIFT 12   // 366us // this seems to be the correct setting but 10 works slightly better
+#endif
 #endif
 
 /**
@@ -76,12 +89,12 @@ typedef struct {
   crystal_addr_t src;
   crystal_epoch_t epoch;
 } 
-__attribute__((packed))
+__attribute__((packed, aligned(1)))
 crystal_sync_hdr_t;
 
 typedef struct {
 } 
-__attribute__((packed))
+__attribute__((packed, aligned(1)))
 crystal_data_hdr_t;
 
 typedef struct {
@@ -89,7 +102,7 @@ typedef struct {
   uint8_t n_ta;
   uint8_t cmd;
 }
-__attribute__((packed))
+__attribute__((packed, aligned(1)))
 crystal_ack_hdr_t;
 
 #define CRYSTAL_TYPE_SYNC 0x01
@@ -103,5 +116,33 @@ crystal_ack_hdr_t;
 #define CRYSTAL_SET_ACK_SLEEP(ack) ((ack).cmd = 0x22)
 
 #define CRYSTAL_ACK_CMD_CORRECT(ack) (CRYSTAL_ACK_AWAKE(ack) || CRYSTAL_ACK_SLEEP(ack))
+
+
+// platform adaptation stubs
+
+#if CRYSTAL_2538
+#define SYSTEM_RESET()
+#define RADIO_OSC_OFF()
+#define RADIO_OSC_ON()
+
+#define GLOSSY_IGNORE_TYPE 0  // this version of glossy does not carry the packet type 
+#define GLOSSY_PRE_TIME 0     // and starts right away in glossy_start()
+
+#define get_rtx_on() 0
+#define get_cca_busy_cnt() 0
+#define is_corrupted() 0
+#endif
+
+#if CRYSTAL_2420
+#define SYSTEM_RESET() do {WDTCTL = 0;} while(0)
+#define RADIO_OSC_OFF() cc2420_oscoff()
+#define RADIO_OSC_ON() cc2420_oscon()
+
+#define GLOSSY_UNKNOWN_INITIATOR 0
+#define GLOSSY_UNKNOWN_N_TX_MAX 0
+#endif
+
+
+
 
 #endif //CRYSTAL_PRIVATE_H
