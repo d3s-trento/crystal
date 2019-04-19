@@ -43,7 +43,6 @@
 #include "cc2538-rf.h"
 #include "dev/leds.h"
 //#include "node-id.h"
-#include "unimplemented.h"
 #endif
 
 #if CRYSTAL_2420
@@ -687,6 +686,7 @@ PT_THREAD(s_node_thread(struct rtimer *t, void* ptr))
       && recvlen_S  == CRYSTAL_S_TOTAL_LEN);
     if (correct_packet) {
       epoch = buf.sync_hdr.epoch;
+      crystal_info.epoch = epoch;
       hopcount = glossy_get_relay_cnt_first_rx();
     }
   }
