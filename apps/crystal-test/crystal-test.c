@@ -183,6 +183,10 @@ PROCESS_THREAD(crystal_test, ev, data) {
   static bool ret;
   EPOCH_END_EV = process_alloc_event();  
 
+#ifdef NODE_ID
+  node_id = NODE_ID;
+#endif
+
   is_sink = node_id == SINK_ID;
 
   if (is_sink)
